@@ -1,5 +1,6 @@
 use crate::{
     app::DialogResult,
+    component::Command,
     event::Key,
     model::pg::{show_pg_index_field, Connections, Field, Index, IndexMethod, Schema},
     pool::{fetch_pg_query, PGPools},
@@ -333,5 +334,8 @@ impl<'a> IndexDialog<'a> {
             }
             _ => Ok(r),
         }
+    }
+    pub fn get_commands(&self) -> Vec<Command> {
+        self.form.get_commands()
     }
 }

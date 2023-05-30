@@ -1,5 +1,6 @@
 use crate::{
     app::DialogResult,
+    component::Command,
     event::Key,
     model::pg::{Field, Unique},
     widget::{Form, FormItem},
@@ -80,5 +81,8 @@ impl<'a> UniqueDialog<'a> {
             }
             _ => Ok(r),
         }
+    }
+    pub fn get_commands(&self) -> Vec<Command> {
+        self.form.get_commands()
     }
 }

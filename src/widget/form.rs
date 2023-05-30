@@ -152,6 +152,16 @@ impl<'a> Form<'a> {
                 _ => cmds.extend(item_cmds),
             }
         }
+        cmds.extend(vec![
+            Command {
+                name: "Cancel",
+                key: CANCEL_KEY
+            },
+            Command {
+                name: "Ok",
+                key: SAVE_KEY 
+            }
+        ]);
         cmds
     }
     pub fn get_focus_item_mut(&mut self) -> Option<&mut FormItem<'a>> {

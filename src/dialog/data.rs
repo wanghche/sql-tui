@@ -1,7 +1,7 @@
 use crate::{
     app::DialogResult,
     component::Command,
-    event::{config::*, Key},
+    event::Key,
     model::{
         mysql::{get_mysql_field_value, Field as MySQLField},
         pg::{get_pg_field_value, Field as PGField, FieldKind as PGFieldKind},
@@ -226,17 +226,6 @@ impl<'a> DataDialog<'a> {
     }
 
     pub fn get_commands(&self) -> Vec<Command> {
-        let mut cmds = self.form.get_commands();
-        cmds.extend(vec![
-            Command {
-                name: "Cancel",
-                key: CANCEL_KEY,
-            },
-            Command {
-                name: "Ok",
-                key: CONFIRM_KEY,
-            },
-        ]);
-        cmds
+        self.form.get_commands()
     }
 }

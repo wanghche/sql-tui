@@ -1,5 +1,6 @@
 use crate::{
     app::DialogResult,
+    component::Command,
     event::Key,
     model::pg::{show_pg_exclude_field, Exclude, Field, IndexMethod, Schema},
     widget::{ColumnInfo, Form, FormItem},
@@ -209,5 +210,8 @@ impl<'a> ExcludeDialog<'a> {
             }
             _ => Ok(r),
         }
+    }
+    pub fn get_commands(&self) -> Vec<Command> {
+        self.form.get_commands()
     }
 }

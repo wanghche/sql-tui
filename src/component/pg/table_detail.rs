@@ -1350,7 +1350,9 @@ impl<'a> TableDetailComponent<'a> {
             || self.delete_foreign_key_dlg.is_some()
             || self.delete_trigger_dlg.is_some()
             || self.delete_check_dlg.is_some()
-            || self.input_dlg.is_some()
+            || self.delete_unique_dlg.is_some()
+            || self.delete_exclude_dlg.is_some()
+            || self.delete_rule_dlg.is_some()
         {
             vec![
                 Command {
@@ -1362,7 +1364,27 @@ impl<'a> TableDetailComponent<'a> {
                     key: CONFIRM_KEY,
                 },
             ]
+        } else if let Some(dlg) = self.input_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.exit_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.info_dlg.as_ref() {
+            dlg.get_commands()
         } else if let Some(dlg) = self.field_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.index_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.foreign_key_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.check_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.exclude_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.rule_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.trigger_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.unique_dlg.as_ref() {
             dlg.get_commands()
         } else {
             self.get_main_commands()

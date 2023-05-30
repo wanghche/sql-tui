@@ -1,7 +1,7 @@
 use crate::{
     app::DialogResult,
     component::Command,
-    event::{config::*, Key},
+    event::Key,
     model::mysql::{get_mysql_db_names, get_mysql_table_names, Connections, Privilege},
     pool::{get_mysql_pool, MySQLPools},
     widget::{Form, FormItem},
@@ -141,17 +141,6 @@ impl<'a> PrivilegeDialog<'a> {
         }
     }
     pub fn get_commands(&self) -> Vec<Command> {
-        let mut cmds = self.form.get_commands();
-        cmds.extend(vec![
-            Command {
-                name: "Cancel",
-                key: CANCEL_KEY,
-            },
-            Command {
-                name: "Ok",
-                key: SAVE_KEY,
-            },
-        ]);
-        cmds
+        self.form.get_commands()
     }
 }

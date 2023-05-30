@@ -1,7 +1,7 @@
 use crate::{
     app::DialogResult,
     component::Command,
-    event::{config::*, Key},
+    event::Key,
     model::mysql::{Trigger, TriggerAction, TriggerTime},
     widget::{Form, FormItem},
 };
@@ -75,18 +75,7 @@ impl<'a> TriggerDialog<'a> {
         self.id.as_ref()
     }
     pub fn get_commands(&self) -> Vec<Command> {
-        let mut cmds = self.form.get_commands();
-        cmds.extend(vec![
-            Command {
-                name: "Cancel",
-                key: CANCEL_KEY,
-            },
-            Command {
-                name: "Ok",
-                key: CONFIRM_KEY,
-            },
-        ]);
-        cmds
+        self.form.get_commands()
     }
     pub fn draw<B>(&mut self, f: &mut Frame<B>)
     where

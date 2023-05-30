@@ -1,7 +1,7 @@
 use crate::{
     app::DialogResult,
     component::Command,
-    event::{config::*, Key},
+    event::Key,
     model::pg::RoleMember,
     widget::{Form, FormItem},
 };
@@ -75,17 +75,6 @@ impl<'a> RoleMemberDialog<'a> {
         }
     }
     pub fn get_commands(&self) -> Vec<Command> {
-        let mut cmds = self.form.get_commands();
-        cmds.extend(vec![
-            Command {
-                name: "Cancel",
-                key: CANCEL_KEY,
-            },
-            Command {
-                name: "Ok",
-                key: SAVE_KEY,
-            },
-        ]);
-        cmds
+        self.form.get_commands()
     }
 }

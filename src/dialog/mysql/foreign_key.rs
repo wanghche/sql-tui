@@ -1,7 +1,7 @@
 use crate::{
     app::DialogResult,
     component::Command,
-    event::{config::*, Key},
+    event::Key,
     model::mysql::{
         get_mysql_db_names, get_mysql_field_names, get_mysql_table_names, Connections, Field,
         ForeignKey, OnDeleteKind, OnUpdateKind,
@@ -145,18 +145,7 @@ impl<'a> ForeignKeyDialog<'a> {
         self.id.as_ref()
     }
     pub fn get_commands(&self) -> Vec<Command> {
-        let mut cmds = self.form.get_commands();
-        cmds.extend(vec![
-            Command {
-                name: "Cancel",
-                key: CANCEL_KEY,
-            },
-            Command {
-                name: "Ok",
-                key: CONFIRM_KEY,
-            },
-        ]);
-        cmds
+        self.form.get_commands()
     }
     pub fn get_ref_db(&self) -> Option<String> {
         match self.form.get_item("reference db").unwrap() {

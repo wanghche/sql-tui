@@ -1,5 +1,6 @@
 use crate::{
     app::DialogResult,
+    component::Command,
     event::Key,
     model::pg::{Field, ForeignKey, OnDeleteKind, OnUpdateKind},
     widget::{Form, FormItem},
@@ -166,5 +167,8 @@ impl<'a> ForeignKeyDialog<'a> {
             }
             _ => Ok(r),
         }
+    }
+    pub fn get_commands(&self) -> Vec<Command> {
+        self.form.get_commands()
     }
 }

@@ -1672,12 +1672,16 @@ impl<'a> ConnectionListComponent<'a> {
             dlg.get_commands()
         } else if let Some(dlg) = self.db_dlg.as_ref() {
             dlg.get_commands()
+        } else if let Some(dlg) = self.schema_dlg.as_ref() {
+            dlg.get_commands()
         } else if let Some(dlg) = self.delete_conn_dlg.as_ref() {
             dlg.get_commands()
         } else if let Some(dlg) = self.delete_db_dlg.as_ref() {
             dlg.get_commands()
+
         } else if let Some(select) = self.new_select.as_ref() {
             select.get_commands()
+        
         } else {
             self.get_main_commands()
         };

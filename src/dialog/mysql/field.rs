@@ -1,7 +1,7 @@
 use crate::{
     app::DialogResult,
     component::Command,
-    event::{config::*, Key},
+    event::Key,
     model::mysql::{
         BinaryField, CharField, Connections, DateField, DateTimeField, DecimalField, EnumField,
         Field, FieldKind, FloatField, IntField, SimpleField, TextField, TimeField,
@@ -142,18 +142,7 @@ impl<'a> FieldDialog<'a> {
         self.id.as_ref()
     }
     pub fn get_commands(&self) -> Vec<Command> {
-        let mut cmds = self.form.get_commands();
-        cmds.extend(vec![
-            Command {
-                name: "Cancel",
-                key: CANCEL_KEY,
-            },
-            Command {
-                name: "Ok",
-                key: CONFIRM_KEY,
-            },
-        ]);
-        cmds
+        self.form.get_commands()
     }
     pub fn get_kind(&self) -> &FieldKind {
         &self.kind

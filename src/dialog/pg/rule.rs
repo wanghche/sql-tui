@@ -1,5 +1,6 @@
 use crate::{
     app::DialogResult,
+    component::Command,
     event::Key,
     model::pg::{DoInstead, EventKind, Rule},
     widget::{Form, FormItem},
@@ -112,5 +113,8 @@ impl<'a> RuleDialog<'a> {
             }
             _ => Ok(r),
         }
+    }
+    pub fn get_commands(&self) -> Vec<Command> {
+        self.form.get_commands()
     }
 }

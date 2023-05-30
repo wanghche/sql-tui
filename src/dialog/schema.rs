@@ -1,5 +1,6 @@
 use crate::{
     app::DialogResult,
+    component::Command,
     event::Key,
     model::pg::Schema,
     widget::{Form, FormItem},
@@ -75,5 +76,8 @@ impl<'a> SchemaDialog<'a> {
     }
     pub fn get_mode(&self) -> &Mode {
         &self.mode
+    }
+    pub fn get_commands(&self) -> Vec<Command> {
+        self.form.get_commands()
     }
 }
