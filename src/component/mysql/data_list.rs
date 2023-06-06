@@ -320,16 +320,11 @@ impl<'a> DataListComponent<'a> {
                 self.create_dlg = Some(data_dlg);
             }
             CONFIRM_KEY => {
-                let key_count = self.fields.iter().filter(|c| c.key()).count();
-                if key_count > 0 {
-                    if let Some(index) = self.state.selected() {
-                        let mut data_dlg = DataDialog::new(format!(
-                            "Edit `{}`",
-                            self.table_name.as_ref().unwrap()
-                        ));
-                        data_dlg.set_mysql_fields_and_row(&self.fields, Some(&self.rows[index]));
-                        self.edit_dlg = Some(data_dlg);
-                    }
+                if let Some(index) = self.state.selected() {
+                    let mut data_dlg =
+                        DataDialog::new(format!("`{}`", self.table_name.as_ref().unwrap()));
+                    data_dlg.set_mysql_fields_and_row(&self.fields, Some(&self.rows[index]));
+                    self.edit_dlg = Some(data_dlg);
                 }
             }
             DELETE_KEY => {
@@ -387,6 +382,9 @@ impl<'a> DataListComponent<'a> {
         row: &MySqlRow,
     ) -> Result<()> {
         let keys: Vec<&Field> = self.fields.iter().filter(|c| c.key()).collect();
+        if keys.is_empty() {
+            return Err(Error::msg("no key field, cannot update data!"));
+        }
         let mut builder: QueryBuilder<MySql> = QueryBuilder::new(format!(
             "UPDATE `{}` SET ",
             self.table_name.as_ref().unwrap()

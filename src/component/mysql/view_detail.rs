@@ -457,8 +457,8 @@ impl<'a> ViewDetailComponent<'a> {
         } else {
             String::new()
         };
-        let definer = if let Some(definer) = map.get("Definer") {
-            if let Some(definer) = definer {
+        let definer = if let Some(definer) = map.get("Definer").unwrap() {
+            if !definer.is_empty() {
                 format!(" DEFINER = {}", definer)
             } else {
                 String::new()

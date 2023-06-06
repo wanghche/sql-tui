@@ -1,7 +1,7 @@
 use crate::{
     app::{ComponentResult, DialogResult, MainPanel},
     component::{Command, CommandBarComponent},
-    dialog::{DetailDialog, InputDialog},
+    dialog::{confirm::Kind as ConfirmKind, ConfirmDialog, DetailDialog, InputDialog},
     event::{config::*, Key},
     model::{
         mysql::{get_mysql_column_value, Connections},
@@ -49,6 +49,7 @@ pub struct QueryDetailComponent<'a> {
     is_result: bool,
     detail_dlg: Option<DetailDialog<'a>>,
     input_dlg: Option<InputDialog<'a>>,
+    exit_dlg: Option<ConfirmDialog>,
     conns: Rc<RefCell<Connections>>,
     pools: Rc<RefCell<MySQLPools>>,
     queries: Rc<RefCell<Queries>>,
@@ -74,6 +75,7 @@ impl<'a> QueryDetailComponent<'a> {
             query: None,
             detail_dlg: None,
             input_dlg: None,
+            exit_dlg: None,
             conns,
             pools,
             queries,
@@ -158,6 +160,9 @@ impl<'a> QueryDetailComponent<'a> {
             dlg.draw(f);
         }
         if let Some(dlg) = self.detail_dlg.as_mut() {
+            dlg.draw(f);
+        }
+        if let Some(dlg) = self.exit_dlg.as_mut() {
             dlg.draw(f);
         }
     }
@@ -283,8 +288,11 @@ impl<'a> QueryDetailComponent<'a> {
     }
     async fn handle_main_event(&mut self, key: &Key) -> Result<ComponentResult> {
         if matches!(*key, BACK_KEY) {
-            self.clear();
-            return Ok(ComponentResult::Back(MainPanel::QueryList));
+            self.exit_dlg = Some(ConfirmDialog::new(
+                ConfirmKind::Confirm,
+                "Exit",
+                "Be sure to exit?",
+            ));
         } else if matches!(*key, SAVE_KEY) {
             if let Some(query) = self.query.as_ref() {
                 let file_path = Queries::get_file_path(query.name())?;
@@ -338,9 +346,24 @@ impl<'a> QueryDetailComponent<'a> {
             self.handle_detail_dlg_event(key)
         } else if self.input_dlg.is_some() {
             self.handle_input_dlg_event(key)
+        } else if self.exit_dlg.is_some() {
+            self.handle_exit_dlg_event(key)
         } else {
             self.handle_main_event(key).await
         }
+    }
+    fn handle_exit_dlg_event(&mut self, key: &Key) -> Result<ComponentResult> {
+        if let Some(dlg) = self.exit_dlg.as_mut() {
+            match dlg.handle_event(key) {
+                DialogResult::Cancel => self.exit_dlg = None,
+                DialogResult::Confirm(_) => {
+                    self.clear();
+                    return Ok(ComponentResult::Back(MainPanel::QueryList));
+                }
+                _ => (),
+            }
+        }
+        Ok(ComponentResult::Done)
     }
     fn handle_input_dlg_event(&mut self, key: &Key) -> Result<ComponentResult> {
         if let Some(dlg) = self.input_dlg.as_mut() {

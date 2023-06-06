@@ -573,7 +573,7 @@ impl<'a> UserDetailComponent<'a> {
                 DialogResult::Cancel => self.exit_dlg = None,
                 DialogResult::Confirm(_) => {
                     self.clear();
-                    return Ok(ComponentResult::Back(MainPanel::RoleListPG));
+                    return Ok(ComponentResult::Back(MainPanel::UserListMySQL));
                 }
                 _ => (),
             }
