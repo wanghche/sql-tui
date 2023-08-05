@@ -199,7 +199,7 @@ impl RoleListComponent {
                         .await?;
                         self.delete_dlg = None;
                         self.roles.remove(index);
-                        self.state = TableState::default();
+                        self.state.select(None);
                     }
                 }
                 _ => (),

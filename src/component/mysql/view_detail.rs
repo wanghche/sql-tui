@@ -159,7 +159,7 @@ impl<'a> ViewDetailComponent<'a> {
                     true,
                     false,
                 ),
-                FormItem::new_input("Definer".to_string(), None, true,false, false),
+                FormItem::new_input("Definer".to_string(), None, true, false, false),
                 FormItem::new_select(
                     "Check Option".to_string(),
                     vec![
@@ -317,20 +317,20 @@ impl<'a> ViewDetailComponent<'a> {
         Ok(ComponentResult::Done)
     }
     async fn handle_main_event(&mut self, key: &Key) -> Result<ComponentResult> {
-        if matches!(*key, BACK_KEY) {
-            self.handle_back_event()
-        } else if matches!(*key, SAVE_KEY) {
-            self.handle_save_event().await
-        } else {
-            match self.panel {
-                PanelKind::Definition => self.handle_panel_definition_event(key),
-                PanelKind::Advanced => self.handle_panel_advanced_event(key),
-                PanelKind::SQLPreview => self.handle_panel_sql_preview_event(key),
-            }
+        match self.panel {
+            PanelKind::Definition => self.handle_panel_definition_event(key).await,
+            PanelKind::Advanced => self.handle_panel_advanced_event(key).await,
+            PanelKind::SQLPreview => self.handle_panel_sql_preview_event(key).await,
         }
     }
-    fn handle_panel_definition_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_definition_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             TAB_RIGHT_KEY => self.panel = PanelKind::Advanced,
             TAB_LEFT_KEY => self.panel = PanelKind::SQLPreview,
             _ => {
@@ -340,18 +340,30 @@ impl<'a> ViewDetailComponent<'a> {
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_advanced_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_advanced_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_RIGHT_KEY => self.panel = PanelKind::SQLPreview,
             TAB_LEFT_KEY => self.panel = PanelKind::Definition,
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             _ => {
-                self.form.handle_event(key)?;
+                let result = self.form.handle_event(key)?;
+                if let DialogResult::Cancel = result {
+                    self.handle_back_event()?;
+                }
             }
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_sql_preview_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_sql_preview_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             TAB_LEFT_KEY => self.panel = PanelKind::Advanced,
             TAB_RIGHT_KEY => self.panel = PanelKind::Definition,
             _ => (),

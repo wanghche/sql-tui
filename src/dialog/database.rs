@@ -131,8 +131,8 @@ impl<'a> DatabaseDialog<'a> {
                 map.insert("conn_id".to_string(), Some(self.conn_id.to_string()));
                 Ok(DialogResult::Confirm(map))
             }
-            DialogResult::Done => Ok(DialogResult::Done),
             DialogResult::Cancel => Ok(DialogResult::Cancel),
+            _ => Ok(DialogResult::Done),
         }
     }
     pub fn get_mode(&self) -> &Mode {

@@ -1,7 +1,7 @@
 use crate::{
     app::{ComponentResult, DialogResult, MainPanel},
     component::{get_table_down_index, get_table_up_index, Command, CommandBarComponent},
-    dialog::{DetailDialog, InputDialog, ConfirmDialog, confirm::Kind as ConfirmKind},
+    dialog::{confirm::Kind as ConfirmKind, ConfirmDialog, DetailDialog, InputDialog},
     event::{config::*, Key},
     model::{
         pg::{get_pg_column_value, Connections},
@@ -9,7 +9,7 @@ use crate::{
     },
     pool::{fetch_pg_query, PGPools},
 };
-use anyhow::Result;
+use anyhow::{Error, Result};
 use sqlx::{
     postgres::{PgColumn, PgRow},
     Column, Row,
@@ -45,6 +45,7 @@ pub struct QueryDetailComponent<'a> {
     detail_dlg: Option<DetailDialog<'a>>,
     input_dlg: Option<InputDialog<'a>>,
     exit_dlg: Option<ConfirmDialog>,
+    info_dlg: Option<ConfirmDialog>,
     conns: Rc<RefCell<Connections>>,
     pools: Rc<RefCell<PGPools>>,
     queries: Rc<RefCell<Queries>>,
@@ -71,6 +72,7 @@ impl<'a> QueryDetailComponent<'a> {
             detail_dlg: None,
             input_dlg: None,
             exit_dlg: None,
+            info_dlg: None,
             conns,
             pools,
             queries,
@@ -160,6 +162,9 @@ impl<'a> QueryDetailComponent<'a> {
         if let Some(dlg) = self.exit_dlg.as_ref() {
             dlg.draw(f);
         }
+        if let Some(dlg) = self.info_dlg.as_ref() {
+            dlg.draw(f);
+        }
     }
     fn draw_query<B>(&mut self, f: &mut Frame<B>, r: Rect)
     where
@@ -216,13 +221,13 @@ impl<'a> QueryDetailComponent<'a> {
             f.render_stateful_widget(table, r, &mut self.row_state);
         } else {
             f.render_widget(
-                Paragraph::new("Query Success.").block(block).style(
-                    if let FocusPanel::Result = self.focus {
+                Paragraph::new("Success,no data returned.")
+                    .block(block)
+                    .style(if let FocusPanel::Result = self.focus {
                         Style::default().fg(Color::Green)
                     } else {
                         Style::default()
-                    },
-                ),
+                    }),
                 r,
             );
         }
@@ -271,7 +276,7 @@ impl<'a> QueryDetailComponent<'a> {
                             Some(get_pg_column_value(col, &self.rows[index])),
                         );
                     });
-                    self.detail_dlg = Some(DetailDialog::new("Data".to_string(), &map));
+                    self.detail_dlg = Some(DetailDialog::from_map("Result".to_string(), &map));
                 }
             }
             _ => (),
@@ -283,26 +288,29 @@ impl<'a> QueryDetailComponent<'a> {
             self.exit_dlg = Some(ConfirmDialog::new(
                 ConfirmKind::Confirm,
                 "Exit",
-                "Be sure to exit?"
+                "Be sure to exit?",
             ));
         } else if matches!(*key, SAVE_KEY) {
-            if let Some(query) = self.query.as_ref() {
-                let file_path = Queries::get_file_path(query.name())?;
-                let mut query = Query::new(
-                    self.conn_id.as_ref().unwrap(),
-                    self.db_name.as_ref().unwrap(),
-                    query.name(),
-                    &file_path,
-                );
-                let query = query.save_file(&self.input.lines().join("\n"))?;
+            let sql = self.input.lines().join("\n");
+            let sql = sql.trim();
+
+            if sql.is_empty() {
+                return Err(Error::msg("no query content"));
+            }
+            if let Some(query) = self.query.as_mut() {
+                query.save_file(&self.input.lines().join("\n"))?;
                 self.queries.borrow_mut().save_query(query)?;
-                self.query = Some(query.clone());
-                self.input_dlg = None;
+                self.info_dlg = Some(ConfirmDialog::new(
+                    ConfirmKind::Info,
+                    "Success",
+                    "Query Save Success!",
+                ));
             } else {
                 self.input_dlg = Some(InputDialog::new("Query Name", None));
             }
         } else if matches!(*key, RUN_KEY) {
             let sql = self.input.lines().join("\n");
+            let sql = sql.trim();
             if !sql.is_empty() {
                 self.rows = fetch_pg_query(
                     self.conns.clone(),
@@ -340,9 +348,21 @@ impl<'a> QueryDetailComponent<'a> {
             self.handle_input_dlg_event(key)
         } else if self.exit_dlg.is_some() {
             self.handle_exit_dlg_event(key)
+        } else if self.info_dlg.is_some() {
+            self.handle_info_dlg_event(key)
         } else {
             self.handle_main_event(key).await
         }
+    }
+    fn handle_info_dlg_event(&mut self, key: &Key) -> Result<ComponentResult> {
+        if let Some(dlg) = self.info_dlg.as_mut() {
+            match dlg.handle_event(key) {
+                DialogResult::Cancel => self.info_dlg = None,
+                DialogResult::Confirm(_) => self.info_dlg = None,
+                _ => (),
+            }
+        }
+        Ok(ComponentResult::Done)
     }
     fn handle_exit_dlg_event(&mut self, key: &Key) -> Result<ComponentResult> {
         if let Some(dlg) = self.exit_dlg.as_mut() {
@@ -362,16 +382,14 @@ impl<'a> QueryDetailComponent<'a> {
             match dlg.handle_event(key) {
                 DialogResult::Cancel => self.input_dlg = None,
                 DialogResult::Confirm(name) => {
-                    let file_path = Queries::get_file_path(&name)?;
                     let mut query = Query::new(
                         self.conn_id.as_ref().unwrap(),
                         self.db_name.as_ref().unwrap(),
                         name.as_str(),
-                        &file_path,
-                    );
-                    let query = query.save_file(&self.input.lines().join("\n"))?;
-                    self.queries.borrow_mut().save_query(query)?;
-                    self.query = Some(query.clone());
+                    )?;
+                    query.save_file(&self.input.lines().join("\n"))?;
+                    self.queries.borrow_mut().save_query(&query)?;
+                    self.query = Some(query);
                     self.input_dlg = None;
                 }
                 _ => (),
@@ -400,13 +418,19 @@ impl<'a> QueryDetailComponent<'a> {
         self.row_state = TableState::default();
         self.detail_dlg = None;
         self.input_dlg = None;
+        self.exit_dlg = None;
+        self.info_dlg = None;
         self.is_result = false;
     }
     fn update_commands(&self) {
-        let mut cmds = if self.input_dlg.is_some() {
-            self.input_dlg.as_ref().unwrap().get_commands()
-        } else if self.detail_dlg.is_some() {
-            self.detail_dlg.as_ref().unwrap().get_commands()
+        let mut cmds = if let Some(dlg) = self.input_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.detail_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.info_dlg.as_ref() {
+            dlg.get_commands()
+        } else if let Some(dlg) = self.exit_dlg.as_ref() {
+            dlg.get_commands()
         } else {
             let mut cmds = match self.focus {
                 FocusPanel::TextArea => self.get_textarea_commands(),
@@ -432,7 +456,7 @@ impl<'a> QueryDetailComponent<'a> {
     }
     fn get_textarea_commands(&self) -> Vec<Command> {
         vec![Command {
-            name: "Switch to Result",
+            name: "Toggle Focus",
             key: SWITCH_KEY,
         }]
     }
@@ -447,13 +471,13 @@ impl<'a> QueryDetailComponent<'a> {
                 key: DOWN_KEY,
             },
             Command {
-                name: "Switch to Input",
+                name: "Toggle Focus",
                 key: SWITCH_KEY,
             },
         ];
         if self.row_state.selected().is_some() {
             cmds.push(Command {
-                name: "Open Data",
+                name: "Open",
                 key: CONFIRM_KEY,
             });
         }

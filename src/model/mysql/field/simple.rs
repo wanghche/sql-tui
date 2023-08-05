@@ -41,10 +41,13 @@ impl SimpleField {
         self.comment.as_deref()
     }
     pub fn get_create_str(&self, kind: String) -> String {
-        let str = format!("`{}` {}", self.name, kind);
-        let str = not_null(&str, self.not_null);
-        let str = comment(&str, self.comment.as_ref());
-        str
+        format!(
+            "`{}` {}{}{}",
+            self.name,
+            kind,
+            not_null(self.not_null()),
+            comment(self.comment())
+        )
     }
     pub fn get_change_str(&self, kind: String, old: &SimpleField) -> Option<String> {
         if old.name != self.name || old.not_null != self.not_null || old.comment != self.comment {

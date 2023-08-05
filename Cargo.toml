@@ -7,9 +7,9 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["macros"] }
-tui = { version = "*", default-features = false, features = ["crossterm"] }
-tui-textarea = { version = "*", default-features = false, features = ["crossterm"] }
-crossterm = { version = "0.25", features = [ "serde" ] }
+tui = { package = "ratatui", version = "0.20.1" }
+tui-textarea = { version = "0.2.0", default-features = false, git="https://github.com/rhysd/tui-textarea.git", features = ["ratatui-crossterm"] }
+crossterm = { version = "0.26", features = [ "serde" ] }
 sqlx = { version = "0.6", features = ["all-types", "mysql", "postgres", "runtime-tokio-native-tls" ] } 
 anyhow = "1"
 chrono = { version = "0.4", features = [ "serde" ] }
@@ -21,3 +21,4 @@ serde_json = { version = "1" }
 itertools = { version = "0.10.5" }
 regex = "1.7"
 time = "0.3"
+dioxus = "0.3.2"

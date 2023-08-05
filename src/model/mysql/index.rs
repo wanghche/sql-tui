@@ -101,7 +101,7 @@ impl Index {
                     "FULLTEXT INDEX `{}`({}){}",
                     self.name,
                     fields.join(","),
-                    if let Some(m) = self.method.as_ref() {
+                    if let Some(m) = self.method() {
                         format!(" USING {}", m)
                     } else {
                         "".to_string()
@@ -113,7 +113,7 @@ impl Index {
                     "INDEX `{}`({}){}",
                     self.name,
                     fields.join(","),
-                    if let Some(m) = self.method.as_ref() {
+                    if let Some(m) = self.method() {
                         format!(" USING {}", m)
                     } else {
                         "".to_string()
@@ -124,7 +124,7 @@ impl Index {
                 "SPATIAL INDEX `{}`({}) USING {}",
                 self.name,
                 fields.join(","),
-                if let Some(m) = self.method.as_ref() {
+                if let Some(m) = self.method() {
                     format!(" USING {}", m)
                 } else {
                     "".to_string()
@@ -134,7 +134,7 @@ impl Index {
                 "UNIQUE INDEX `{}`({}){}",
                 self.name,
                 fields.join(","),
-                if let Some(m) = self.method.as_ref() {
+                if let Some(m) = self.method() {
                     format!(" USING {}", m)
                 } else {
                     "".to_string()
@@ -148,7 +148,7 @@ impl Index {
         sql
     }
     pub fn get_drop_ddl(&self) -> String {
-        format!("DROP INDEX {}", self.name)
+        format!("DROP INDEX `{}`", self.name)
     }
     pub fn get_add_ddl(&self) -> String {
         format!("ADD {}", self.get_create_ddl())
@@ -156,7 +156,7 @@ impl Index {
     pub fn get_alter_ddl(&self, old: &Index) -> Vec<String> {
         let mut ddl = Vec::new();
         if old.name != self.name {
-            ddl.push(format!("RENAME INDEX {} TO {}", old.name, self.name))
+            ddl.push(format!("RENAME INDEX `{}` TO `{}`", old.name, self.name))
         }
         if old.fields != self.fields
             || old.kind != self.kind
@@ -224,7 +224,7 @@ pub fn convert_show_index_to_mysql_indexes(fields: Vec<MySqlRow>) -> Vec<Index> 
                 fields: index_fields,
                 method: IndexMethod::try_from(index_type.as_str()).ok(),
                 kind,
-                comment: None,
+                comment: row.try_get::<Option<String>, _>("Index_comment").unwrap(),
             }
         })
         .collect()

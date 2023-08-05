@@ -23,7 +23,7 @@ impl<'a> ForeignKeyDialog<'a> {
             vec![
                 FormItem::new_input("name".to_string(), Some(fk.name()), false, false, false),
                 FormItem::new_select(
-                    "fields".to_string(),
+                    "field".to_string(),
                     fields.iter().map(|f| f.name.to_string()).collect(),
                     Some(fk.field().to_string()),
                     false,
@@ -64,6 +64,7 @@ impl<'a> ForeignKeyDialog<'a> {
                     true,
                     false,
                 ),
+                FormItem::new_input("comment".to_string(), fk.comment(), true, false, false),
             ]
         } else {
             vec![
@@ -98,6 +99,7 @@ impl<'a> ForeignKeyDialog<'a> {
                     true,
                     false,
                 ),
+                FormItem::new_input("comment".to_string(), None, true, false, false),
             ]
         });
         ForeignKeyDialog {

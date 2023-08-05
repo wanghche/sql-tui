@@ -1,6 +1,6 @@
 use crate::{
     model::{mysql::Connections, DatabaseKind, DB},
-    pool::{get_mysql_pool, MySQLPools},
+    pool::{fetch_one_mysql, get_mysql_pool, MySQLPools},
 };
 use anyhow::Result;
 use sqlx::{mysql::MySqlRow, MySqlPool, Row};
@@ -76,7 +76,21 @@ impl Database {
         }
     }
 }
-
+pub async fn get_mysql_version(
+    conns: Rc<RefCell<Connections>>,
+    pools: Rc<RefCell<MySQLPools>>,
+    conn_id: &Uuid,
+) -> Result<Version> {
+    let version: String = fetch_one_mysql(conns, pools, conn_id, None, "SELECT VERSION()")
+        .await?
+        .try_get(0)
+        .unwrap();
+    if version.starts_with('8') {
+        Ok(Version::Eight)
+    } else {
+        Ok(Version::Five)
+    }
+}
 pub async fn get_mysql_database(
     conns: Rc<RefCell<Connections>>,
     pools: Rc<RefCell<MySQLPools>>,

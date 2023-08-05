@@ -27,7 +27,7 @@ impl<'a> UniqueDialog<'a> {
                     fields.iter().map(|f| f.name().to_string()).collect(),
                     u.fields().to_vec(),
                     false,
-                    false,
+                    true,
                 ),
                 FormItem::new_input("comment".to_string(), u.comment(), true, false, false),
             ]

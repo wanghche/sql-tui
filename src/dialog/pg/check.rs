@@ -30,12 +30,14 @@ impl<'a> CheckDialog<'a> {
                     false,
                 ),
                 FormItem::new_check("no inherit".to_string(), c.no_inherit(), false),
+                FormItem::new_input("comment".to_string(), c.comment(), true, false, false),
             ]
         } else {
             vec![
                 FormItem::new_input("name".to_string(), None, false, false, false),
                 FormItem::new_textarea("expression".to_string(), None, false, false, false),
                 FormItem::new_check("no inherit".to_string(), false, false),
+                FormItem::new_input("comment".to_string(), None, true, false, false),
             ]
         });
         CheckDialog {

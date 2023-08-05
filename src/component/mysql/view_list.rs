@@ -212,6 +212,7 @@ impl ViewListComponent {
                         .await?;
                         self.views.remove(i);
                         self.delete_dlg = None;
+                        self.state.select(None);
                     }
                 }
                 _ => (),

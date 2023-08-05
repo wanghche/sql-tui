@@ -518,6 +518,7 @@ impl<'a> RoleDetailComponent<'a> {
                     if let Some(index) = self.privileges_state.selected() {
                         self.privileges.remove(index);
                         self.delete_privilege_dlg = None;
+                        self.privileges_state.select(None);
                     }
                 }
                 _ => (),

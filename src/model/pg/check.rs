@@ -26,19 +26,31 @@ impl Check {
     pub fn comment(&self) -> Option<&str> {
         self.comment.as_deref()
     }
-    pub fn get_create_ddl(&self) -> String {
-        format!(
-            "CONSTRAINT \"{}\" CHECK ({}){}",
-            self.name,
-            self.expression,
-            if self.no_inherit() { " NO INHERIT" } else { "" }
+    pub fn get_create_ddl(&self, schema_name: &str, table_name: &str) -> (String, Option<String>) {
+        (
+            format!(
+                r#"CONSTRAINT "{}" CHECK ({}){}"#,
+                self.name,
+                self.expression,
+                if self.no_inherit() { " NO INHERIT" } else { "" }
+            ),
+            self.comment().map(|c| {
+                format!(
+                    r#"COMMENT ON CONSTRAINT "{}" ON "{}"."{}" IS '{}';"#,
+                    self.name(),
+                    schema_name,
+                    table_name,
+                    c
+                )
+            }),
         )
     }
-    pub fn get_add_ddl(&self) -> String {
-        format!("ADD {}", self.get_create_ddl())
+    pub fn get_add_ddl(&self, schema_name: &str, table_name: &str) -> (String, Option<String>) {
+        let (check_ddl, comment_ddl) = self.get_create_ddl(schema_name, table_name);
+        (format!("ADD {}", check_ddl), comment_ddl)
     }
     pub fn get_drop_ddl(&self) -> String {
-        format!("DROP CONSTRAINT \"{}\"", self.name)
+        format!(r#"DROP CONSTRAINT "{}""#, self.name)
     }
     pub fn get_alter_ddl(
         &self,
@@ -48,7 +60,7 @@ impl Check {
     ) -> (Vec<String>, Option<String>) {
         let comment = if old.comment() != self.comment() {
             Some(format!(
-                "COMMENT ON \"{}\" ON \"{}\".\"{}\" IS '{}'",
+                r#"COMMENT ON CONSTRAINT "{}" ON "{}"."{}" IS '{}'"#,
                 self.name,
                 schema_name,
                 table_name,
@@ -80,7 +92,7 @@ pub fn convert_row_to_pg_check(rows: Vec<PgRow>) -> Vec<Check> {
                 name: row.try_get("constraint_name").unwrap(),
                 expression,
                 no_inherit,
-                comment: None,
+                comment: row.try_get("comment").unwrap(),
             }
         })
         .collect()

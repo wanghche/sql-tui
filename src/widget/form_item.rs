@@ -267,11 +267,16 @@ impl<'a> FormItem<'a> {
         can_null: bool,
         readonly: bool,
     ) -> FormItem<'a> {
-        let textarea = if let Some(content) = content {
+        let mut textarea = if let Some(content) = content {
             TextArea::from(content.lines())
         } else {
             TextArea::default()
         };
+        textarea.set_block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded),
+        );
         FormItem::TextArea {
             name,
             textarea,
@@ -590,7 +595,12 @@ impl<'a> FormItem<'a> {
                 );
                 f.render_widget(widget, r);
             }
-            FormItem::Check { name, checked, .. } => {
+            FormItem::Check {
+                name,
+                checked,
+                readonly,
+                ..
+            } => {
                 let widget = Paragraph::new(if *checked {
                     Span::raw("\u{2705}")
                 } else {
@@ -601,7 +611,13 @@ impl<'a> FormItem<'a> {
                         .title(name.as_str())
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
-                        .border_style(if is_focus { focus_style } else { default_style }),
+                        .border_style(if is_focus {
+                            focus_style
+                        } else if *readonly {
+                            readonly_style
+                        } else {
+                            default_style
+                        }),
                 );
                 f.render_widget(widget, r);
             }
@@ -640,6 +656,7 @@ impl<'a> FormItem<'a> {
                 nullable,
                 can_null,
                 is_null,
+                readonly,
                 ..
             } => f.render_widget(
                 Paragraph::new(if !textarea.is_empty() {
@@ -659,7 +676,13 @@ impl<'a> FormItem<'a> {
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded),
                 )
-                .style(if is_focus { focus_style } else { default_style }),
+                .style(if is_focus {
+                    focus_style
+                } else if *readonly {
+                    readonly_style
+                } else {
+                    default_style
+                }),
                 r,
             ),
             FormItem::List {
@@ -687,7 +710,13 @@ impl<'a> FormItem<'a> {
                         .title(title.as_str())
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
-                        .border_style(if is_focus { focus_style } else { default_style }),
+                        .border_style(if is_focus {
+                            focus_style
+                        } else if *readonly {
+                            readonly_style
+                        } else {
+                            default_style
+                        }),
                 );
                 f.render_widget(widget, r);
             }
@@ -720,7 +749,13 @@ impl<'a> FormItem<'a> {
                         .title(title.as_str())
                         .borders(Borders::ALL)
                         .border_type(BorderType::Rounded)
-                        .border_style(if is_focus { focus_style } else { default_style }),
+                        .border_style(if is_focus {
+                            focus_style
+                        } else if *readonly {
+                            readonly_style
+                        } else {
+                            default_style
+                        }),
                 );
                 f.render_widget(widget, r);
             }
@@ -804,7 +839,7 @@ impl<'a> FormItem<'a> {
     {
         let bounds = f.size();
         let width = min(bounds.width - 2, 40);
-        let height = 20;
+        let height = min(bounds.height, options.len() as u16 + 2);
         let left = (bounds.width - width) / 2;
         let top = (bounds.height - height) / 2;
         let rect = Rect::new(left, top, width, height);
@@ -873,12 +908,11 @@ impl<'a> FormItem<'a> {
         B: Backend,
     {
         let bounds = f.size();
-        let width = min(bounds.width - 2, 40);
-        let height = 6 + 2;
+        let width = min(bounds.width - 2, 45);
+        let height = min(bounds.height, 3);
         let left = (bounds.width - width) / 2;
         let top = (bounds.height - height) / 2;
         let rect = Rect::new(left, top, width, height);
-
         f.render_widget(Clear, rect);
 
         textarea.set_block(
@@ -887,13 +921,7 @@ impl<'a> FormItem<'a> {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded),
         );
-        f.render_widget(
-            textarea.widget(),
-            rect.inner(&Margin {
-                vertical: 1,
-                horizontal: 1,
-            }),
-        );
+        f.render_widget(textarea.widget(), rect);
     }
     fn draw_table_list_list_dlg<B>(
         f: &mut Frame<B>,
@@ -906,7 +934,7 @@ impl<'a> FormItem<'a> {
     {
         let bounds = f.size();
         let width = min(bounds.width - 2, columns.len() as u16 * 15);
-        let height = bounds.height / 4;
+        let height = bounds.height / 2;
         let left = (bounds.width - width) / 2;
         let top = (bounds.height - height) / 2;
         let rect = Rect::new(left, top, width, height);
@@ -1514,6 +1542,7 @@ impl<'a> FormItem<'a> {
                 NEW_KEY => FormItemResult::Handled,
                 CONFIRM_KEY => {
                     *is_pop = true;
+                    *list_selected = selected.clone();
                     FormItemResult::Handled
                 }
                 _ => FormItemResult::UnHandled,
@@ -1531,7 +1560,7 @@ impl<'a> FormItem<'a> {
         match dlg_state {
             DialogState::List => {
                 match *key {
-                    CANCEL_KEY => {
+                    SAVE_KEY | CANCEL_KEY => {
                         *dlg_state = DialogState::None;
                     }
                     UP_KEY => {
@@ -1558,6 +1587,7 @@ impl<'a> FormItem<'a> {
                         }
                     }
                     NEW_KEY => {
+                        *textarea = TextArea::default();
                         *dlg_state = DialogState::Input;
                     }
                     CONFIRM_KEY => {
@@ -1567,6 +1597,7 @@ impl<'a> FormItem<'a> {
                             *dlg_state = DialogState::Input;
                         }
                     }
+
                     _ => (),
                 }
                 FormItemResult::Handled
@@ -1587,7 +1618,24 @@ impl<'a> FormItem<'a> {
                         }
                         *dlg_state = DialogState::List;
                     }
-                    _ => (),
+                    Key {
+                        code: KeyCode::Enter,
+                        ..
+                    }
+                    | Key {
+                        code: KeyCode::Tab, ..
+                    }
+                    | Key {
+                        code: KeyCode::Up, ..
+                    }
+                    | Key {
+                        code: KeyCode::Down,
+                        ..
+                    } => {}
+                    _ => {
+                        let key: Input = key.clone().into();
+                        textarea.input(key);
+                    }
                 }
                 FormItemResult::Handled
             }
@@ -1613,7 +1661,7 @@ impl<'a> FormItem<'a> {
         match dlg_state {
             DialogState::List => {
                 match *key {
-                    CANCEL_KEY => {
+                    SAVE_KEY | CANCEL_KEY => {
                         *dlg_state = DialogState::None;
                     }
                     UP_KEY => {
@@ -1659,7 +1707,7 @@ impl<'a> FormItem<'a> {
                                         *selected = Some(row[i].clone())
                                     }
                                 });
-                            *dlg_state = DialogState::Input;
+                            *dlg_state = DialogState::None;
                         }
                     }
                     _ => (),
@@ -1667,39 +1715,44 @@ impl<'a> FormItem<'a> {
                 Ok(FormItemResult::Handled)
             }
             DialogState::Input => {
-                if let FormItemResult::UnHandled = columns[*focus].handle_event(key)? {
-                    match *key {
-                        UP_KEY => {
-                            if *focus != 0 {
-                                *focus -= 1;
+                let result = columns[*focus].handle_event(key)?;
+                match result {
+                    FormItemResult::UnHandled => {
+                        match *key {
+                            UP_KEY => {
+                                if *focus != 0 {
+                                    *focus -= 1;
+                                }
                             }
-                        }
-                        DOWN_KEY => {
-                            if *focus < columns.len() - 1 {
-                                *focus += 1;
+                            DOWN_KEY => {
+                                if *focus < columns.len() - 1 {
+                                    *focus += 1;
+                                }
                             }
-                        }
-                        CANCEL_KEY => {
-                            *dlg_state = DialogState::List;
-                            *focus = 0;
-                            *offset = 0;
-                            *edit_index = None;
-                        }
-                        SAVE_KEY => {
-                            Self::validate_input(columns)?;
-                            let data = Self::get_data(columns);
-                            if let Some(index) = edit_index {
-                                rows[*index] = data;
+                            CANCEL_KEY => {
+                                *dlg_state = DialogState::List;
+                                *focus = 0;
+                                *offset = 0;
                                 *edit_index = None;
-                            } else {
-                                rows.push(data);
                             }
-                            *dlg_state = DialogState::List;
-                        }
-                        _ => (),
-                    };
+                            SAVE_KEY => {
+                                Self::validate_input(columns)?;
+                                let data = Self::get_data(columns);
+                                if let Some(index) = edit_index {
+                                    rows[*index] = data;
+                                    *edit_index = None;
+                                } else {
+                                    rows.push(data);
+                                }
+                                *dlg_state = DialogState::List;
+                            }
+                            _ => (),
+                        };
+
+                        Ok(FormItemResult::Handled)
+                    }
+                    _ => Ok(result),
                 }
-                Ok(FormItemResult::Handled)
             }
             DialogState::None => match *key {
                 CONFIRM_KEY => {

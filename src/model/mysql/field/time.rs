@@ -56,12 +56,15 @@ impl TimeField {
         self.comment.as_deref()
     }
     pub fn get_create_str(&self, kind: String) -> String {
-        let str = format!("`{}` {}", self.name, kind);
-        let str = length(&str, self.length.as_ref());
-        let str = not_null(&str, self.not_null);
-        let str = default_value(&str, self.default_value.as_ref(), false);
-        let str = comment(&str, self.comment.as_ref());
-        str
+        format!(
+            "`{}` {}{}{}{}{}",
+            self.name(),
+            kind,
+            length(self.length()),
+            not_null(self.not_null()),
+            default_value(self.default_value(), false),
+            comment(self.comment())
+        )
     }
     pub fn get_change_str(&self, kind: String, old: &TimeField) -> Option<String> {
         if old.name != self.name

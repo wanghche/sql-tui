@@ -208,7 +208,7 @@ impl ViewListComponent {
                         .await?;
                         self.delete_dlg = None;
                         self.views.remove(index);
-                        self.state = TableState::default();
+                        self.state.select(None);
                     }
                 }
                 _ => (),

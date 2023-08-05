@@ -155,12 +155,12 @@ impl<'a> Form<'a> {
         cmds.extend(vec![
             Command {
                 name: "Cancel",
-                key: CANCEL_KEY
+                key: CANCEL_KEY,
             },
             Command {
                 name: "Ok",
-                key: SAVE_KEY 
-            }
+                key: SAVE_KEY,
+            },
         ]);
         cmds
     }
@@ -178,32 +178,29 @@ impl<'a> Form<'a> {
         key: &Key,
     ) -> Result<DialogResult<HashMap<String, Option<String>>>> {
         match self.items[self.focus].handle_event(key)? {
-            FormItemResult::Changed(name, changed) => {
-                return Ok(DialogResult::Changed(name, changed));
-            }
+            FormItemResult::Changed(name, changed) => Ok(DialogResult::Changed(name, changed)),
             FormItemResult::UnHandled => match *key {
                 UP_KEY => {
                     if self.focus != 0 {
                         self.focus -= 1;
                     }
+                    Ok(DialogResult::Done)
                 }
                 DOWN_KEY => {
                     if self.focus < self.items.len() - 1 {
                         self.focus += 1;
                     }
+                    Ok(DialogResult::Done)
                 }
-                CANCEL_KEY => {
-                    return Ok(DialogResult::Cancel);
-                }
+                CANCEL_KEY => Ok(DialogResult::Cancel),
                 SAVE_KEY => {
                     self.validate_input()?;
-                    return Ok(DialogResult::Confirm(self.get_data()));
+                    Ok(DialogResult::Confirm(self.get_data()))
                 }
-                _ => (),
+                _ => Ok(DialogResult::Done),
             },
-            FormItemResult::Handled => (),
+            FormItemResult::Handled => Ok(DialogResult::Done),
         }
-        Ok(DialogResult::Done)
     }
     pub fn clear(&mut self) {
         self.items.iter_mut().for_each(|item| item.clear());
@@ -218,12 +215,23 @@ impl<'a> Form<'a> {
                     nullable,
                     can_null,
                     is_null,
+                    input,
                     ..
                 } => {
                     if !*nullable {
-                        if *can_null && *is_null {
+                        if (*can_null && *is_null) || (!*can_null && input.is_empty()) {
                             return Err(Error::msg(format!("Please input {}", name)));
                         }
+                    }
+                }
+                FormItem::TextArea {
+                    name,
+                    nullable,
+                    textarea,
+                    ..
+                } => {
+                    if !nullable && textarea.is_empty() {
+                        return Err(Error::msg(format!("Please input {}", name)));
                     }
                 }
                 FormItem::Select {
@@ -246,7 +254,33 @@ impl<'a> Form<'a> {
                         return Err(Error::msg(format!("Please select {}", name)));
                     }
                 }
-                _ => (),
+                FormItem::List {
+                    name,
+                    nullable,
+                    items,
+                    ..
+                } => {
+                    if !nullable && items.is_empty() {
+                        return Err(Error::msg(format!(
+                            "Please add at least one item in {}",
+                            name
+                        )));
+                    }
+                }
+                FormItem::TableList {
+                    name,
+                    nullable,
+                    rows,
+                    ..
+                } => {
+                    if !nullable && rows.is_empty() {
+                        return Err(Error::msg(format!(
+                            "Please add at least one item in {}",
+                            name
+                        )));
+                    }
+                }
+                FormItem::Check { .. } => (),
             }
         }
         Ok(())
@@ -288,9 +322,7 @@ impl<'a> Form<'a> {
                     );
                 }
                 FormItem::Select { name, selected, .. } => {
-                    if let Some(s) = selected {
-                        map.insert(name.to_string(), Some(s.to_owned()));
-                    }
+                    map.insert(name.to_string(), selected.clone());
                 }
                 FormItem::Check { name, checked, .. } => {
                     map.insert(name.to_string(), Some(checked.to_string()));

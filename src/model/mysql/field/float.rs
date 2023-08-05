@@ -84,15 +84,18 @@ impl FloatField {
         self.comment.as_deref()
     }
     pub fn get_create_str(&self, kind: String) -> String {
-        let str = format!("`{}` {}", self.name, kind);
-        let str = length_decimal(&str, self.length.as_ref(), self.decimal.as_ref());
-        let str = unsigned(&str, self.unsigned);
-        let str = zerofill(&str, self.zerofill);
-        let str = not_null(&str, self.not_null);
-        let str = default_value(&str, self.default_value.as_ref(), false);
-        let str = auto_increment(&str, self.auto_increment);
-        let str = comment(&str, self.comment.as_ref());
-        str
+        format!(
+            "`{}` {}{}{}{}{}{}{}{}",
+            self.name,
+            kind,
+            length_decimal(self.length(), self.decimal()),
+            unsigned(self.unsigned()),
+            zerofill(self.zerofill()),
+            not_null(self.not_null()),
+            default_value(self.default_value(), false),
+            auto_increment(self.auto_increment()),
+            comment(self.comment())
+        )
     }
     pub fn get_change_str(&self, kind: String, old: &FloatField) -> Option<String> {
         if old.name != self.name

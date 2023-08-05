@@ -9,7 +9,7 @@ use crate::{
     widget::{Form, FormItem},
 };
 use anyhow::{Error, Result};
-use sqlx::{mysql::MySqlRow, postgres::PgRow, Row};
+use sqlx::{mysql::MySqlRow, postgres::PgRow};
 use std::cmp::min;
 use std::collections::HashMap;
 use tui::{backend::Backend, layout::Rect, widgets::Clear, Frame};
@@ -31,111 +31,100 @@ impl<'a> DataDialog<'a> {
     pub fn set_mysql_fields_and_row(&mut self, fields: &[MySQLField], row: Option<&MySqlRow>) {
         let items: Vec<FormItem<'a>> = fields
             .iter()
-            .map(|field| match field {
-                MySQLField::Enum(f) => FormItem::new_select(
-                    field.name().to_string(),
-                    f.options.clone(),
-                    if let Some(r) = row {
-                        r.try_get(field.name()).unwrap()
-                    } else {
-                        None
-                    },
-                    !field.not_null(),
-                    false,
-                ),
-                MySQLField::Set(f) => FormItem::new_multi_select(
-                    field.name().to_string(),
-                    f.options.clone(),
-                    if let Some(r) = row {
-                        let values: Option<String> = r.try_get(field.name()).unwrap();
-                        if let Some(vals) = values {
+            .map(|field| {
+                let value = if let Some(row) = row {
+                    get_mysql_field_value(field, row)
+                } else {
+                    None
+                };
+                match field {
+                    MySQLField::Enum(f) => FormItem::new_select(
+                        field.name().to_string(),
+                        f.options.clone(),
+                        value,
+                        !field.not_null(),
+                        false,
+                    ),
+                    MySQLField::Set(f) => FormItem::new_multi_select(
+                        field.name().to_string(),
+                        f.options.clone(),
+                        if let Some(vals) = value {
                             vals.replace(",", "")
                                 .split(',')
                                 .map(String::from)
                                 .collect::<Vec<String>>()
                         } else {
                             vec![]
-                        }
-                    } else {
-                        vec![]
-                    },
-                    !field.not_null(),
-                    false,
-                ),
-                MySQLField::Int(f)
-                | MySQLField::BigInt(f)
-                | MySQLField::Integer(f)
-                | MySQLField::MediumInt(f)
-                | MySQLField::SmallInt(f)
-                | MySQLField::TinyInt(f) => {
-                    let value = if let Some(row) = row {
-                        get_mysql_field_value(field, row)
-                    } else {
-                        None
-                    };
-                    FormItem::new_input(
+                        },
+                        !field.not_null(),
+                        false,
+                    ),
+                    MySQLField::Int(f)
+                    | MySQLField::BigInt(f)
+                    | MySQLField::Integer(f)
+                    | MySQLField::MediumInt(f)
+                    | MySQLField::SmallInt(f)
+                    | MySQLField::TinyInt(f) => FormItem::new_input(
                         field.name().to_string(),
                         value.as_deref(),
                         !field.not_null() || f.auto_increment || field.default_value().is_some(),
                         !field.not_null(),
                         false,
-                    )
-                }
-                MySQLField::Float(f) | MySQLField::Double(f) | MySQLField::Real(f) => {
-                    let value = if let Some(row) = row {
-                        get_mysql_field_value(field, row)
-                    } else {
-                        None
-                    };
-                    FormItem::new_input(
-                        field.name().to_string(),
-                        value.as_deref(),
-                        !field.not_null() || f.auto_increment || field.default_value().is_some(),
-                        !field.not_null(),
-                        false,
-                    )
-                }
-                MySQLField::VarChar(_)
-                | MySQLField::Char(_)
-                | MySQLField::Numeric(_)
-                | MySQLField::Decimal(_)
-                | MySQLField::Year(_)
-                | MySQLField::Date(_)
-                | MySQLField::Time(_)
-                | MySQLField::DateTime(_)
-                | MySQLField::Timestamp(_) => {
-                    let value = if let Some(row) = row {
-                        get_mysql_field_value(field, row)
-                    } else {
-                        None
-                    };
-                    FormItem::new_input(
+                    ),
+                    MySQLField::Float(f) | MySQLField::Double(f) | MySQLField::Real(f) => {
+                        FormItem::new_input(
+                            field.name().to_string(),
+                            value.as_deref(),
+                            !field.not_null()
+                                || f.auto_increment
+                                || field.default_value().is_some(),
+                            !field.not_null(),
+                            false,
+                        )
+                    }
+                    MySQLField::VarChar(_)
+                    | MySQLField::Char(_)
+                    | MySQLField::Numeric(_)
+                    | MySQLField::Decimal(_)
+                    | MySQLField::Year(_)
+                    | MySQLField::Date(_)
+                    | MySQLField::Time(_)
+                    | MySQLField::DateTime(_)
+                    | MySQLField::Timestamp(_) => FormItem::new_input(
                         field.name().to_string(),
                         value.as_deref(),
                         !field.not_null() || field.default_value().is_some(),
                         !field.not_null(),
                         false,
-                    )
-                }
-                MySQLField::Text(_)
-                | MySQLField::TinyText(_)
-                | MySQLField::MediumText(_)
-                | MySQLField::LongText(_)
-                | MySQLField::Json(_) => {
-                    let value = if let Some(row) = row {
-                        get_mysql_field_value(field, row)
-                    } else {
-                        None
-                    };
-                    FormItem::new_input(
+                    ),
+                    MySQLField::Text(_)
+                    | MySQLField::TinyText(_)
+                    | MySQLField::MediumText(_)
+                    | MySQLField::LongText(_)
+                    | MySQLField::Json(_) => FormItem::new_input(
                         field.name().to_string(),
                         value.as_deref(),
                         !field.not_null(),
                         !field.not_null(),
                         false,
-                    )
+                    ),
+                    MySQLField::Binary(_) | MySQLField::VarBinary(_) | MySQLField::Bit(_) => {
+                        FormItem::new_input(
+                            field.name().to_string(),
+                            value.as_deref(),
+                            !field.not_null() || field.default_value().is_some(),
+                            !field.not_null(),
+                            false,
+                        )
+                    }
+                    _ => FormItem::new_input(
+                        field.name().to_string(),
+                        value.as_deref(),
+                        !field.not_null(),
+                        !field.not_null(),
+                        true,
+                    ),
                 }
-                _ => FormItem::new_input(field.name().to_string(), None, true, true, true),
             })
             .collect();
 
@@ -186,7 +175,7 @@ impl<'a> DataDialog<'a> {
     {
         let bounds = f.size();
         let width = min(bounds.width - 2, 60);
-        let height = min(self.form.height(), bounds.height);
+        let height = min(self.form.height(), bounds.height - 2);
         let left = (bounds.width - width) / 2;
         let top = (bounds.height - height) / 2;
 

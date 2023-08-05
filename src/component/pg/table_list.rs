@@ -179,6 +179,7 @@ impl TableListComponent {
                     .await?;
                     self.tables.remove(index);
                     self.delete_dlg = None;
+                    self.state.select(None);
                 }
             }
             _ => (),

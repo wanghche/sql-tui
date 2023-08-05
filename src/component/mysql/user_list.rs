@@ -203,7 +203,7 @@ impl UserListComponent {
                         .await?;
                         self.delete_dlg = None;
                         self.users.remove(index);
-                        self.state = TableState::default();
+                        self.state.select(None);
                     }
                 }
                 _ => (),

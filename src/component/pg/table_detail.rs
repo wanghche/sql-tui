@@ -186,7 +186,7 @@ impl<'a> TableDetailComponent<'a> {
                 self.conns.clone(),
                 self.pools.clone(),
                 conn_id,
-                None,
+                Some(db_name),
                 &format!(
                     "SELECT col_description((table_schema||'.'||table_name)::regclass::oid, ordinal_position) as comment,* FROM information_schema.columns WHERE table_schema = '{}' and table_name = '{}' order by ordinal_position ASC",
                     schema_name, table_name
@@ -197,7 +197,7 @@ impl<'a> TableDetailComponent<'a> {
                 self.conns.clone(),
                 self.pools.clone(),
                 conn_id,
-                None,
+                Some(db_name),
                 &format!("SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid and a.attnum = ANY(i.indkey) WHERE i.indrelid = '{}'::regclass AND i.indisprimary", table_name),
             )
             .await?;
@@ -216,7 +216,7 @@ impl<'a> TableDetailComponent<'a> {
                 Some(db_name),
                 &format!("select conname from pg_constraint where conrelid = '{}'::regclass and contype='p'",table_name)
             ).await?;
-            self.key_name = pr_key.try_get("conname").unwrap();
+            self.key_name = pr_key.map(|key| key.try_get("conname").unwrap());
 
             let indexes = fetch_pg_query(
                 self.conns.clone(),
@@ -224,7 +224,7 @@ impl<'a> TableDetailComponent<'a> {
                 conn_id,
                 Some(db_name),
                 &format!(
-                    "SELECT inds.* FROM pg_indexes AS inds JOIN pg_index AS ind ON inds.indexname::regclass = ind.indexrelid WHERE inds.tablename='{}' AND inds.schemaname='{}' AND ind.indisprimary = false",
+                    "SELECT obj_description(indexname::regclass) as comment, inds.* FROM pg_indexes AS inds JOIN pg_index AS ind ON inds.indexname::regclass = ind.indexrelid WHERE inds.tablename='{}' AND inds.schemaname='{}' AND ind.indisprimary = false",
                     table_name, schema_name
                 ),
             )
@@ -236,12 +236,14 @@ impl<'a> TableDetailComponent<'a> {
                 self.conns.clone(),
                 self.pools.clone(),
                 conn_id,
-                None,
+                Some(db_name),
                 &format!(
                     r"
-                    SELECT conrelid::regclass AS table_name,
-                           conname AS foreign_key,
-                           pg_get_constraintdef(oid) AS def
+                    SELECT 
+                        obj_description(oid) as comment,
+                        conrelid::regclass AS table_name,
+                        conname AS foreign_key,
+                        pg_get_constraintdef(oid) AS def
                     FROM pg_constraint
                     WHERE contype = 'f' and conrelid::regclass::text = '{}'
                     AND connamespace = '{}'::regnamespace
@@ -259,10 +261,11 @@ impl<'a> TableDetailComponent<'a> {
                 self.conns.clone(),
                 self.pools.clone(),
                 conn_id,
-                None,
+                Some(db_name),
                 &format!(
                     r"
                     SELECT 
+                        obj_description(c.oid) as comment,
                         c.conname AS constraint_name,
                         array_agg(a.attname ORDER BY k.n) AS columns
                     FROM pg_constraint AS c
@@ -284,10 +287,12 @@ impl<'a> TableDetailComponent<'a> {
                 self.conns.clone(),
                 self.pools.clone(),
                 conn_id,
-                None,
+                Some(db_name),
                 &format!(
                     r"
-                    SELECT pgc.conname AS constraint_name,
+                    SELECT
+                        obj_description(pgc.oid) as comment,
+                        pgc.conname AS constraint_name,
                         pg_get_constraintdef(pgc.oid) AS def
                     FROM pg_constraint pgc
                     JOIN pg_namespace nsp ON nsp.oid = pgc.connamespace
@@ -311,10 +316,11 @@ impl<'a> TableDetailComponent<'a> {
                 self.conns.clone(),
                 self.pools.clone(),
                 conn_id,
-                None,
+                Some(db_name),
                 &format!(
                     r"
                     SELECT
+                        obj_description(oid) as comment,
                         pg_catalog.pg_get_constraintdef(oid,true) AS def,
                         conname
                     FROM pg_constraint
@@ -333,10 +339,14 @@ impl<'a> TableDetailComponent<'a> {
                 self.conns.clone(),
                 self.pools.clone(),
                 conn_id,
-                None,
+                Some(db_name),
                 &format!(
                     r"
-                        SELECT * FROM pg_rules WHERE schemaname='{}' and tablename='{}'",
+                    SELECT
+                        *
+                    FROM
+                        pg_rules
+                    WHERE schemaname='{}' and tablename='{}'",
                     schema_name, table_name,
                 ),
             )
@@ -349,7 +359,7 @@ impl<'a> TableDetailComponent<'a> {
                 self.conns.clone(),
                 self.pools.clone(),
                 conn_id,
-                None,
+                Some(db_name),
                 &format!(
                     r"
                     SELECT
@@ -377,6 +387,28 @@ impl<'a> TableDetailComponent<'a> {
 
             self.triggers = convert_row_to_pg_trigger(&triggers);
             self.old_triggers = self.triggers.clone();
+
+            self.comment = if let Some(c) = fetch_one_pg(
+                self.conns.clone(),
+                self.pools.clone(),
+                conn_id,
+                Some(db_name),
+                &format!(
+                    "SELECT obj_description('{}'::regclass) as comment",
+                    table_name
+                ),
+            )
+            .await?
+            .unwrap()
+            .try_get::<Option<&str>, _>("comment")
+            .unwrap()
+            {
+                TextArea::from(c.lines())
+            } else {
+                TextArea::default()
+            };
+
+            self.old_comment = self.comment.clone();
         }
 
         Ok(())
@@ -389,7 +421,7 @@ impl<'a> TableDetailComponent<'a> {
         f.render_widget(
             Block::default()
                 .title(if let Some(name) = &self.table_name {
-                    format!("Edit Table {name}")
+                    format!("Edit {name}")
                 } else {
                     "New Table".to_string()
                 })
@@ -561,7 +593,7 @@ impl<'a> TableDetailComponent<'a> {
         } else if self.rule_dlg.is_some() {
             self.handle_rule_dlg_event(key)?
         } else if self.exclude_dlg.is_some() {
-            self.handle_exclude_dlg_event(key)?
+            self.handle_exclude_dlg_event(key).await?
         } else if self.trigger_dlg.is_some() {
             self.handle_trigger_dlg_event(key)?
         } else if self.check_dlg.is_some() {
@@ -620,24 +652,17 @@ impl<'a> TableDetailComponent<'a> {
                     RowUI::new(vec![
                         u.name().to_string(),
                         u.fields().join(","),
-                        //                 u.table_space().map(|s| s.to_string()).unwrap_or_default(),
-                        //                u.fill_factor().map(|s| s.to_string()).unwrap_or_default(),
-                        u.comment().map(|s| s.to_string()).unwrap_or_default(),
+                        u.comment().map(|c| c.to_string()).unwrap_or_default(),
                     ])
                 })
                 .collect::<Vec<RowUI>>(),
         )
-        .header(RowUI::new(vec![
-            "Name", "Fields", //   "Table Space",
-            //  "Fill Factor",
-            "comment",
-        ]))
+        .header(RowUI::new(vec!["Name", "Fields", "Comment"]))
         .block(Block::default())
         .widths(&[
-            Constraint::Ratio(1, 4),
-            Constraint::Ratio(1, 4),
-            Constraint::Ratio(1, 4),
-            Constraint::Ratio(1, 4),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
         ])
         .highlight_style(Style::default().fg(Color::Green));
         f.render_stateful_widget(table, r, &mut self.uniques_state);
@@ -753,45 +778,44 @@ impl<'a> TableDetailComponent<'a> {
         if !key_fields.is_empty() {
             let names: Vec<String> = key_fields
                 .iter()
-                .map(|f| format!("\"{}\"", f.name()))
+                .map(|f| format!(r#""{}""#, f.name()))
                 .collect();
             table_ddl.push(format!("\nPRIMARY KEY ({})", names.join(",")));
         }
-        let mut fk_ddls: Vec<String> = self
-            .foreign_keys
-            .iter()
-            .map(|fk| fk.get_create_ddl())
-            .collect();
-        if !fk_ddls.is_empty() {
-            table_ddl.append(&mut fk_ddls);
-        }
+        self.foreign_keys.iter().for_each(|fk| {
+            let (fk_ddl, comment_ddl) = fk.get_create_ddl(self.schema_name().unwrap(), table_name);
+            table_ddl.push(fk_ddl);
+            if let Some(c) = comment_ddl {
+                comments_ddl.push(c);
+            }
+        });
 
-        let mut unique_sqls: Vec<String> = self
-            .uniques
-            .iter()
-            .map(|unique| unique.get_create_ddl())
-            .collect();
-        if !unique_sqls.is_empty() {
-            table_ddl.append(&mut unique_sqls);
-        }
+        self.uniques.iter().for_each(|unique| {
+            let (un_ddl, comment_ddl) =
+                unique.get_create_ddl(self.schema_name().unwrap(), table_name);
+            table_ddl.push(un_ddl);
+            if let Some(c) = comment_ddl {
+                comments_ddl.push(c);
+            }
+        });
 
-        let mut check_sqls: Vec<String> = self
-            .checks
-            .iter()
-            .map(|check| check.get_create_ddl())
-            .collect();
-        if !check_sqls.is_empty() {
-            table_ddl.append(&mut check_sqls);
-        }
+        self.checks.iter().for_each(|check| {
+            let (check_ddl, comment_ddl) =
+                check.get_create_ddl(self.schema_name().unwrap(), table_name);
+            table_ddl.push(check_ddl);
+            if let Some(c) = comment_ddl {
+                comments_ddl.push(c);
+            }
+        });
 
-        let mut exclude_sqls: Vec<String> = self
-            .excludes
-            .iter()
-            .map(|exclude| exclude.get_create_ddl())
-            .collect();
-        if !exclude_sqls.is_empty() {
-            table_ddl.append(&mut exclude_sqls);
-        }
+        self.excludes.iter().for_each(|exclude| {
+            let (exclude_ddl, comment_ddl) =
+                exclude.get_create_ddl(self.schema_name().unwrap(), table_name);
+            table_ddl.push(exclude_ddl);
+            if let Some(c) = comment_ddl {
+                comments_ddl.push(c);
+            }
+        });
 
         let rule_sqls: Vec<String> = if !self.rules.is_empty() {
             self.rules
@@ -826,7 +850,7 @@ impl<'a> TableDetailComponent<'a> {
         });
 
         format!(
-            "CREATE TABLE \"{}\".\"{}\" (\n{}\n);\n
+            "CREATE TABLE \"{}\".\"{}\" (\n{}\n);
             {}
             {}
             {}
@@ -867,14 +891,15 @@ impl<'a> TableDetailComponent<'a> {
             .count();
         if key_fields.len() != old_key_fields.len() || match_len != key_fields.len() {
             if let Some(kname) = self.key_name.as_ref() {
-                main_table_ddl.push(format!("DROP CONSTRAINT \"{}\"", kname,));
+                main_table_ddl.push(format!(r#"DROP CONSTRAINT "{}""#, kname,));
             }
             main_table_ddl.push(format!("ADD PRIMARY KEY ({})", key_fields.join(",")));
         }
 
         let (mut rename_index_ddl, mut index_comments_ddl, mut alter_index_ddl) =
             self.build_index_alter_ddl();
-        let (mut rename_fk_ddl, mut alter_fk_ddl) = self.build_foreign_key_alter_ddl();
+        let (mut rename_fk_ddl, mut fk_comments_ddl, mut alter_fk_ddl) =
+            self.build_foreign_key_alter_ddl();
         main_table_ddl.append(&mut alter_fk_ddl);
         let (mut rename_unique_ddl, mut unique_comments_ddl, mut alter_unique_ddl) =
             self.build_unique_alter_ddl();
@@ -900,15 +925,16 @@ impl<'a> TableDetailComponent<'a> {
 
         if !main_table_ddl.is_empty() {
             ddl.push(format!(
-                "ALTER TABLE \"{}\".\"{}\"",
+                r#"ALTER TABLE "{}"."{}""#,
                 self.schema_name.as_deref().unwrap(),
                 self.table_name.as_deref().unwrap()
             ));
-            ddl.push(main_table_ddl.join(",\n"));
+            ddl.push(format!("{};", main_table_ddl.join(",\n")));
         }
         ddl.append(&mut alter_index_ddl);
         ddl.append(&mut field_comments_ddl);
         ddl.append(&mut index_comments_ddl);
+        ddl.append(&mut fk_comments_ddl);
         ddl.append(&mut unique_comments_ddl);
         ddl.append(&mut check_comments_ddl);
         ddl.append(&mut exclude_comments_ddl);
@@ -917,7 +943,7 @@ impl<'a> TableDetailComponent<'a> {
 
         if self.comment.lines() != self.old_comment.lines() {
             ddl.push(format!(
-                "COMMENT ON TABLE \"{}\".\"{}\" IS '{}'",
+                r#"COMMENT ON TABLE "{}"."{}" IS '{}';"#,
                 self.schema_name.as_deref().unwrap(),
                 self.table_name.as_deref().unwrap(),
                 self.comment.lines().join("\n")
@@ -1045,9 +1071,12 @@ impl<'a> TableDetailComponent<'a> {
         });
         (rename_ddl, comments_ddl, ddl)
     }
-    fn build_foreign_key_alter_ddl(&self) -> (Vec<String>, Vec<String>) {
+    fn build_foreign_key_alter_ddl(&self) -> (Vec<String>, Vec<String>, Vec<String>) {
         let mut alter_table_ddl = Vec::new();
         let mut rename_ddl = Vec::new();
+        let mut comments_ddl = Vec::new();
+        let schema_name = self.schema_name().unwrap();
+        let table_name = self.table_name().unwrap();
 
         let fk_ids = self
             .foreign_keys
@@ -1069,7 +1098,11 @@ impl<'a> TableDetailComponent<'a> {
         alter_table_ddl.append(&mut drop_fks_str);
         self.foreign_keys.iter().for_each(|fk| {
             if !old_fk_ids.contains(fk.id()) {
-                alter_table_ddl.push(fk.get_add_ddl());
+                let (fk_ddl, comment_ddl) = fk.get_add_ddl(schema_name, table_name);
+                alter_table_ddl.push(fk_ddl);
+                if let Some(comment) = comment_ddl {
+                    comments_ddl.push(comment);
+                }
             } else {
                 let same_fk = self
                     .old_foreign_keys
@@ -1082,13 +1115,17 @@ impl<'a> TableDetailComponent<'a> {
                     rename_ddl.append(&mut rename_fk);
                 }
 
-                let mut alter_fk = fk.get_alter_ddl();
+                let (mut alter_fk, comment_ddl) =
+                    fk.get_alter_ddl(same_fk, schema_name, table_name);
                 if !alter_fk.is_empty() {
                     alter_table_ddl.append(&mut alter_fk);
                 }
+                if let Some(comment) = comment_ddl {
+                    comments_ddl.push(comment);
+                }
             }
         });
-        (rename_ddl, alter_table_ddl)
+        (rename_ddl, comments_ddl, alter_table_ddl)
     }
     fn build_exclude_alter_ddl(&self) -> (Vec<String>, Vec<String>, Vec<String>) {
         let mut alter_table_ddl = Vec::new();
@@ -1114,7 +1151,12 @@ impl<'a> TableDetailComponent<'a> {
         alter_table_ddl.append(&mut drop_excludes_str);
         self.excludes.iter().for_each(|exclude| {
             if !old_exclude_ids.contains(exclude.id()) {
-                alter_table_ddl.push(exclude.get_add_ddl());
+                let (exclude_ddl, comment_ddl) =
+                    exclude.get_add_ddl(self.schema_name().unwrap(), self.table_name().unwrap());
+                alter_table_ddl.push(exclude_ddl);
+                if let Some(comment) = comment_ddl {
+                    comments_ddl.push(comment);
+                }
             } else {
                 let same_exclude = self
                     .old_excludes
@@ -1193,6 +1235,8 @@ impl<'a> TableDetailComponent<'a> {
         let mut alter_table_ddl = Vec::new();
         let mut rename_ddl = Vec::new();
         let mut comments_ddl = Vec::new();
+        let schema_name = self.schema_name().unwrap();
+        let table_name = self.table_name().unwrap();
 
         let unique_ids = self
             .uniques
@@ -1214,7 +1258,11 @@ impl<'a> TableDetailComponent<'a> {
         alter_table_ddl.append(&mut drop_uniques_ddl);
         self.uniques.iter().for_each(|unique| {
             if !old_unique_ids.contains(unique.id()) {
-                alter_table_ddl.push(unique.get_add_ddl());
+                let (un_ddl, comment_ddl) = unique.get_add_ddl(schema_name, table_name);
+                alter_table_ddl.push(un_ddl);
+                if let Some(comment) = comment_ddl {
+                    comments_ddl.push(comment);
+                }
             } else {
                 let same_unique = self
                     .old_uniques
@@ -1228,11 +1276,8 @@ impl<'a> TableDetailComponent<'a> {
                     rename_ddl.append(&mut rename_unique);
                 }
 
-                let (mut alter_unique_ddl, comment_ddl) = unique.get_alter_ddl(
-                    same_unique,
-                    self.schema_name.as_deref().unwrap(),
-                    self.table_name.as_deref().unwrap(),
-                );
+                let (mut alter_unique_ddl, comment_ddl) =
+                    unique.get_alter_ddl(same_unique, schema_name, table_name);
                 if !alter_unique_ddl.is_empty() {
                     alter_table_ddl.append(&mut alter_unique_ddl);
                 }
@@ -1315,7 +1360,12 @@ impl<'a> TableDetailComponent<'a> {
         alter_table_ddl.append(&mut drop_checks_ddl);
         self.checks.iter().for_each(|check| {
             if !old_check_ids.contains(check.id()) {
-                alter_table_ddl.push(check.get_add_ddl());
+                let (check_ddl, comment_ddl) =
+                    check.get_add_ddl(self.schema_name().unwrap(), self.table_name().unwrap());
+                alter_table_ddl.push(check_ddl);
+                if let Some(comment) = comment_ddl {
+                    comments_ddl.push(comment);
+                }
             } else {
                 let same_check = self
                     .old_checks
@@ -1328,7 +1378,6 @@ impl<'a> TableDetailComponent<'a> {
                 if !rename_check.is_empty() {
                     rename_ddl.append(&mut rename_check);
                 }
-
                 let (mut alter_check, comment_ddl) = check.get_alter_ddl(
                     same_check,
                     self.schema_name.as_deref().unwrap(),
@@ -1798,11 +1847,17 @@ impl<'a> TableDetailComponent<'a> {
                         c.name(),
                         c.expression(),
                         if c.no_inherit() { "\u{2705}" } else { "" },
+                        c.comment().unwrap_or(""),
                     ])
                 })
                 .collect::<Vec<RowUI>>(),
         )
-        .header(RowUI::new(vec!["Name", "Expression", "No Inherit"]))
+        .header(RowUI::new(vec![
+            "Name",
+            "Expression",
+            "No Inherit",
+            "Comment",
+        ]))
         .block(Block::default())
         .widths(&[
             Constraint::Ratio(1, 4),
@@ -2060,14 +2115,13 @@ impl<'a> TableDetailComponent<'a> {
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_exclude_dlg_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_exclude_dlg_event(&mut self, key: &Key) -> Result<ComponentResult> {
         if let Some(dlg) = self.exclude_dlg.as_mut() {
-            match dlg.handle_event(key)? {
+            match dlg.handle_event(key).await? {
                 DialogResult::Cancel => {
                     self.exclude_dlg = None;
                 }
                 DialogResult::Confirm(map) => {
-                    println!("{}", map.len());
                     let exclude = Self::map_to_exclude(&map);
                     match dlg.get_id() {
                         None => self.excludes.push(exclude),
@@ -2153,19 +2207,31 @@ impl<'a> TableDetailComponent<'a> {
             comment: map.get("comment").unwrap().as_ref().map(|s| s.to_string()),
             default_value: map
                 .get("default value")
-                .unwrap()
-                .as_ref()
-                .map(|s| s.to_string()),
-            length: map
-                .get("length")
-                .unwrap()
-                .as_ref()
-                .and_then(|s| s.parse::<i32>().ok()),
-            decimal: map
-                .get("decimal")
-                .unwrap()
-                .as_ref()
-                .and_then(|s| s.parse::<i32>().ok()),
+                .map(|dv| dv.to_owned().unwrap_or_default()),
+            length: {
+                let length = map.get("length");
+                if let Some(length) = length {
+                    if let Some(length) = length {
+                        length.parse::<i32>().ok()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            },
+            decimal: {
+                let decimal = map.get("decimal");
+                if let Some(decimal) = decimal {
+                    if let Some(deciaml) = decimal {
+                        deciaml.parse::<i32>().ok()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            },
         }
     }
     fn map_to_index(map: &HashMap<String, Option<String>>) -> Index {
@@ -2262,8 +2328,6 @@ impl<'a> TableDetailComponent<'a> {
                 .split(',')
                 .map(|s| s.to_string())
                 .collect(),
-            //table_space: map.get("table space").map(|s| s.to_string()),
-            // fill_factor: map.get("fill factor").map(|s| s.to_string()),
             comment: map.get("comment").unwrap().as_ref().map(|s| s.to_string()),
         }
     }
@@ -2671,7 +2735,14 @@ impl<'a> TableDetailComponent<'a> {
                     self.db_name.as_deref(),
                 )
                 .await?;
-                self.exclude_dlg = Some(ExcludeDialog::new(&self.fields, &schemas, None));
+                self.exclude_dlg = Some(ExcludeDialog::new(
+                    &self.fields,
+                    &schemas,
+                    None,
+                    self.conns.clone(),
+                    self.pools.clone(),
+                    self.conn_id.as_ref().unwrap(),
+                ));
             }
             CONFIRM_KEY => {
                 if let Some(index) = self.excludes_state.selected() {
@@ -2686,6 +2757,9 @@ impl<'a> TableDetailComponent<'a> {
                         &self.fields,
                         &schemas,
                         Some(&self.excludes[index]),
+                        self.conns.clone(),
+                        self.pools.clone(),
+                        self.conn_id.as_ref().unwrap(),
                     ));
                 }
             }
@@ -3216,5 +3290,11 @@ impl<'a> TableDetailComponent<'a> {
             }
         }
         ComponentResult::Done
+    }
+    fn schema_name(&self) -> Option<&str> {
+        self.schema_name.as_deref()
+    }
+    fn table_name(&self) -> Option<&str> {
+        self.table_name.as_deref()
     }
 }

@@ -63,7 +63,7 @@ pub const CLEAR_KEY: Key = Key {
 pub const TAB_LEFT_KEY: Key = if cfg!(windows) {
     Key {
         code: Code::Tab,
-        modifier: Mod::Ctrl,
+        modifier: Mod::Shift,
     }
 } else {
     Key {

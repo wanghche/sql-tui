@@ -26,18 +26,27 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn new(conn_id: &Uuid, db_name: &str, name: &str, file_path: &str) -> Self {
-        Query {
-            id: Uuid::new_v4(),
+    pub fn new(conn_id: &Uuid, db_name: &str, name: &str) -> Result<Self> {
+        let id = Uuid::new_v4();
+        let file_path = Self::get_file_path(&id)?;
+        Ok(Query {
+            id,
             conn_id: *conn_id,
             db_name: db_name.to_string(),
             name: name.to_string(),
-            file_path: file_path.to_string(),
+            file_path,
             file_size: 0,
             created_date: None,
             modified_date: None,
             access_time: None,
-        }
+        })
+    }
+    pub fn get_file_path(id: &Uuid) -> Result<String> {
+        let mut path = dirs_next::home_dir().ok_or(Error::msg("home dir not exists"))?;
+        path.push(APP_DIR);
+        path.push(QUERY_DIR);
+        path.push(format!("{}.sql", id.to_string()));
+        Ok(path.to_str().unwrap().to_string())
     }
     pub fn id(&self) -> &Uuid {
         &self.id
@@ -53,8 +62,12 @@ impl Query {
     }
     pub fn save_file(&mut self, sql: &str) -> Result<&Self> {
         if Path::new(&self.file_path).exists() {
-            let mut file = OpenOptions::new().write(true).open(&self.file_path)?;
-            write!(file, "{}", sql)?;
+            let mut file = OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .create(true)
+                .open(&self.file_path)?;
+            file.write(sql.as_bytes())?;
             self.modified_date = Some(Utc::now());
             self.file_size = file.metadata().unwrap().len();
         } else {
@@ -67,6 +80,12 @@ impl Query {
             self.file_size = file.metadata().unwrap().len();
         };
         Ok(self)
+    }
+    pub fn delete_file(&mut self) -> Result<()> {
+        if Path::new(&self.file_path).exists() {
+            std::fs::remove_file(&self.file_path)?;
+        }
+        Ok(())
     }
     pub fn load_file(&mut self) -> Result<(String, &Self)> {
         if Path::new(&self.file_path).exists() {
@@ -135,13 +154,7 @@ impl Queries {
             Ok(content)
         }
     }
-    pub fn get_file_path(query_name: &str) -> Result<String> {
-        let mut path = dirs_next::home_dir().ok_or(Error::msg("home dir not exists"))?;
-        path.push(APP_DIR);
-        path.push(QUERY_DIR);
-        path.push(format!("{}.sql", query_name.replace(" ", "_")));
-        Ok(path.to_str().unwrap().to_string())
-    }
+
     pub fn get_query(&self, conn_id: &Uuid, db_name: &str, query_name: &str) -> Option<Query> {
         self.0
             .iter()
@@ -164,10 +177,14 @@ impl Queries {
         }
         let mut file = Queries::get_config_file()?;
         let json = serde_json::to_string(self)?;
-        write!(file, "{}", json.trim())?;
+        file.write(json.as_bytes())?;
         Ok(())
     }
     pub fn delete_query(&mut self, query_id: &Uuid) -> Result<()> {
+        let mut query = self.0.iter_mut().find(|q| q.id() == query_id);
+        if let Some(query) = query.as_mut() {
+            query.delete_file()?;
+        }
         let mut file = Queries::get_config_file()?;
         self.0 = self
             .0
@@ -176,8 +193,7 @@ impl Queries {
             .cloned()
             .collect();
         let json = serde_json::to_string(self)?;
-        write!(file, "")?;
-        write!(file, "{}", json.trim())?;
+        file.write(json.as_bytes())?;
         Ok(())
     }
 }

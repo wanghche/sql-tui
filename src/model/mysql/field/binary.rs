@@ -8,7 +8,7 @@ pub struct BinaryField {
     pub not_null: bool,
     pub key: bool,
     pub comment: Option<String>,
-    pub length: Option<String>,
+    pub length: String,
     pub default_value: Option<String>,
 }
 
@@ -26,7 +26,7 @@ impl BinaryField {
             name: name.to_string(),
             not_null,
             key,
-            length: Some(length.to_string()),
+            length: length.to_string(),
             comment: comment.map(|s| s.to_string()),
             default_value: default_value.map(|s| s.to_string()),
         }
@@ -46,8 +46,8 @@ impl BinaryField {
     pub fn not_null(&self) -> bool {
         self.not_null
     }
-    pub fn length(&self) -> Option<&str> {
-        self.length.as_deref()
+    pub fn length(&self) -> &str {
+        &self.length
     }
     pub fn extra(&self) -> Option<&str> {
         None
@@ -56,12 +56,15 @@ impl BinaryField {
         self.comment.as_deref()
     }
     pub fn get_create_str(&self, kind: String) -> String {
-        let str = format!("`{}` {}", self.name, kind);
-        let str = length(&str, self.length.as_ref());
-        let str = not_null(&str, self.not_null);
-        let str = default_value(&str, self.default_value.as_ref(), false);
-        let str = comment(&str, self.comment.as_ref());
-        str
+        format!(
+            "`{}` {}{}{}{}{}",
+            self.name(),
+            kind,
+            length(Some(self.length())),
+            not_null(self.not_null),
+            default_value(self.default_value(), false),
+            comment(self.comment())
+        )
     }
     pub fn get_change_str(&self, kind: String, old: &BinaryField) -> Option<String> {
         if old.name != self.name

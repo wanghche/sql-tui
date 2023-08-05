@@ -129,17 +129,37 @@ impl Field {
             _ => self.kind.to_string(),
         }
     }
-    pub fn get_create_ddl(&self, schema_name: &str, table_name: &str) -> (String, Option<String>) {
-        let field_ddl = format!(
-            "  \"{}\" {} {}{}",
-            self.name,
-            self.get_kind_ddl(),
-            if self.not_null { "NOT NULL" } else { "" },
-            if let Some(de_val) = self.default_value() {
-                format!(r#" DEFAULT {}"#, de_val)
+    pub fn get_default_value_ddl(&self) -> String {
+        if let Some(de_val) = self.default_value() {
+            if !de_val.is_empty() {
+                let val = match self.kind {
+                    FieldKind::VarChar
+                    | FieldKind::Char
+                    | FieldKind::Time
+                    | FieldKind::Timestamp
+                    | FieldKind::TimestampTz
+                    | FieldKind::TimeTz
+                    | FieldKind::VarBit
+                    | FieldKind::Bit => {
+                        format!("'{}'", de_val)
+                    }
+                    _ => String::from(de_val),
+                };
+                format!(r#" DEFAULT {}"#, val)
             } else {
                 String::from("")
             }
+        } else {
+            String::from("")
+        }
+    }
+    pub fn get_create_ddl(&self, schema_name: &str, table_name: &str) -> (String, Option<String>) {
+        let field_ddl = format!(
+            r#" "{}" {} {}{}"#,
+            self.name,
+            self.get_kind_ddl(),
+            if self.not_null { "NOT NULL" } else { "" },
+            self.get_default_value_ddl(),
         );
 
         let comment_ddl = if let Some(comment) = self.comment() {
@@ -307,23 +327,28 @@ pub fn convert_show_column_to_pg_fields(fields: Vec<PgRow>, key_names: Vec<Strin
         .map(|r| {
             let name: String = r.try_get("column_name").unwrap();
             let key = key_names.contains(&name);
+            let udt_name = r.try_get::<&str, _>("udt_name").unwrap();
 
-            let kind =
-                FieldKind::try_from(r.try_get::<String, _>("udt_name").unwrap().as_str()).unwrap();
+            let kind = if let Ok(k) = FieldKind::try_from(udt_name) {
+                k
+            } else {
+                FieldKind::Char
+            };
 
             let length = match kind {
-                FieldKind::Int4 | FieldKind::Int2 | FieldKind::Decimal | FieldKind::Numeric => {
-                    Some(r.try_get("numeric_precision").unwrap())
-                }
-                FieldKind::VarChar | FieldKind::Char => {
+                FieldKind::Int4
+                | FieldKind::Int2
+                | FieldKind::Decimal
+                | FieldKind::Numeric
+                | FieldKind::Float4
+                | FieldKind::Float8 => r.try_get("numeric_precision").unwrap(),
+                FieldKind::VarChar | FieldKind::Char | FieldKind::Bit => {
                     r.try_get("character_maximum_length").unwrap()
                 }
                 _ => None,
             };
             let decimal = match kind {
-                FieldKind::Decimal | FieldKind::Numeric => {
-                    Some(r.try_get("numeric_scale").unwrap())
-                }
+                FieldKind::Decimal | FieldKind::Numeric => r.try_get("numeric_scale").unwrap(),
                 _ => None,
             };
             Field {

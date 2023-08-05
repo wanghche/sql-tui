@@ -41,7 +41,7 @@ impl Select {
     {
         let bounds = f.size();
         let width = min(bounds.width - 2, 40);
-        let height = bounds.height / 4;
+        let height = min(bounds.height, self.options.len() as u16 + 2);
         let left = (bounds.width - width) / 2;
         let top = (bounds.height - height) / 2;
         let rect = Rect::new(left, top, width, height);
@@ -141,8 +141,8 @@ where
     B: Backend,
 {
     let bounds = f.size();
-    let width = min(bounds.width - 2, 40);
-    let height = bounds.height / 4;
+    let width = min(bounds.width - 2, 45);
+    let height = min(bounds.height, options.len() as u16 + 2);
     let left = (bounds.width - width) / 2;
     let top = (bounds.height - height) / 2;
     let rect = Rect::new(left, top, width, height);

@@ -41,6 +41,7 @@ pub enum FieldKind {
     Enum,
     Float,
     Geometry,
+    #[strum(serialize = "geomcollection")]
     GeometryCollection,
     Int,
     Integer,
@@ -209,7 +210,7 @@ impl Field {
     pub fn kind(&self) -> FieldKind {
         match self {
             Field::BigInt(_) => FieldKind::BigInt,
-            Field::Binary(_) => FieldKind::Bit,
+            Field::Binary(_) => FieldKind::Binary,
             Field::Bit(_) => FieldKind::Bit,
             Field::Blob(_) => FieldKind::Blob,
             Field::Char(_) => FieldKind::Char,
@@ -529,9 +530,7 @@ impl Field {
             Field::Enum(e) => e.get_create_str(FieldKind::Enum.to_string()),
             Field::Float(f) => f.get_create_str(FieldKind::Float.to_string()),
             Field::Geometry(g) => g.get_create_str(FieldKind::Geometry.to_string()),
-            Field::GeometryCollection(g) => {
-                g.get_create_str(FieldKind::GeometryCollection.to_string())
-            }
+            Field::GeometryCollection(g) => g.get_create_str("geometrycollection".to_string()),
             Field::Int(i) => i.get_create_str(FieldKind::Int.to_string()),
             Field::Integer(i) => i.get_create_str(FieldKind::Integer.to_string()),
             Field::Json(s) => s.get_create_str(FieldKind::Json.to_string()),
@@ -849,7 +848,7 @@ impl Field {
         format!("ADD {}", self.get_create_str())
     }
     pub fn get_drop_str(&self) -> String {
-        format!("DROP COLUMN {}", self.name())
+        format!("DROP COLUMN `{}`", self.name())
     }
 }
 
@@ -863,99 +862,125 @@ pub async fn get_mysql_field_names(pool: &MySqlPool, table: &str) -> Result<Vec<
     Ok(fields)
 }
 
-pub fn unsigned(str: &str, unsigned: bool) -> String {
-    if unsigned {
-        format!("{} UNSIGNED", str)
-    } else {
-        str.to_owned()
-    }
+pub fn unsigned(unsigned: bool) -> String {
+    format!(
+        "{}",
+        if unsigned {
+            String::from(" UNSIGNED")
+        } else {
+            String::from("")
+        }
+    )
 }
 
-pub fn zerofill(str: &str, zerofill: bool) -> String {
-    if zerofill {
-        format!("{} ZEROFILL", str)
-    } else {
-        str.to_owned()
-    }
+pub fn zerofill(zerofill: bool) -> String {
+    format!(
+        "{}",
+        if zerofill {
+            String::from(" ZEROFILL")
+        } else {
+            String::from("")
+        }
+    )
 }
 
-pub fn default_value(str: &str, default_value: Option<&String>, quote: bool) -> String {
+pub fn default_value(default_value: Option<&str>, quote: bool) -> String {
     if let Some(d) = default_value {
-        if quote {
-            format!("{} DEFAULT '{}'", str, d)
+        if !d.is_empty() {
+            if quote {
+                format!(" DEFAULT '{}'", d)
+            } else {
+                format!(" DEFAULT {}", d)
+            }
         } else {
-            format!("{} DEFAULT {}", str, d)
+            String::from("")
         }
     } else {
-        str.to_owned()
+        String::from("")
     }
 }
 
-pub fn length(str: &str, length: Option<&String>) -> String {
-    if let Some(l) = length {
-        format!("{}({})", str, l)
+pub fn length(length: Option<&str>) -> String {
+    let l = length.unwrap();
+    if !l.is_empty() {
+        format!("({})", l)
     } else {
-        str.to_owned()
+        String::from("")
     }
 }
 
-pub fn length_decimal(str: &str, length: Option<&String>, decimal: Option<&String>) -> String {
-    if let Some(l) = length {
-        if let Some(d) = decimal {
-            format!("{}({},{})", str, l, d)
+pub fn length_decimal(length: Option<&str>, decimal: Option<&str>) -> String {
+    let l = length.unwrap();
+    let d = decimal.unwrap();
+    if !l.is_empty() {
+        if !d.is_empty() {
+            format!("({},{})", l, d)
         } else {
-            format!("{}({})", str, l)
+            format!("({})", l)
         }
     } else {
-        str.to_owned()
+        String::from("")
     }
 }
 
-pub fn character_set(str: &str, character_set: Option<&str>) -> String {
+pub fn character_set(character_set: Option<&str>) -> String {
     if let Some(c) = character_set {
-        format!("{} CHARACTER SET {}", str, c)
-    } else {
-        str.to_owned()
-    }
-}
-
-pub fn collation(str: &str, collation: Option<&str>) -> String {
-    if let Some(c) = collation {
-        format!("{} COLLATE {}", str, c)
-    } else {
-        str.to_owned()
-    }
-}
-
-pub fn not_null(str: &str, not_null: bool) -> String {
-    format!("{} {}", str, if not_null { "NOT NULL" } else { "NULL" })
-}
-
-pub fn auto_increment(str: &str, auto_increment: bool) -> String {
-    if auto_increment {
-        format!("{} AUTO_INCREMENT", str)
-    } else {
-        str.to_owned()
-    }
-}
-
-pub fn on_update(str: &str, on_update: bool, length: Option<&String>) -> String {
-    if on_update {
-        if let Some(l) = length {
-            format!("{} ON UPDATE CURRENT_TIMESTAMP ({})", str, l)
+        if !c.is_empty() {
+            format!(" CHARACTER SET {}", c)
         } else {
-            format!("{} ON UPDATE CURRENT_TIMESTAMP", str)
+            String::from("")
         }
     } else {
-        str.to_owned()
+        String::from("")
     }
 }
 
-pub fn comment(str: &str, comment: Option<&String>) -> String {
-    if let Some(c) = comment {
-        format!("{} COMMENT '{}'", str, c)
+pub fn collation(collation: Option<&str>) -> String {
+    if let Some(c) = collation {
+        if !c.is_empty() {
+            format!(" COLLATE {}", c)
+        } else {
+            String::from("")
+        }
     } else {
-        str.to_owned()
+        String::from("")
+    }
+}
+
+pub fn not_null(not_null: bool) -> String {
+    format!("{}", if not_null { " NOT NULL" } else { " NULL" })
+}
+
+pub fn auto_increment(auto_increment: bool) -> String {
+    format!(
+        "{}",
+        if auto_increment {
+            " AUTO_INCREMENT"
+        } else {
+            ""
+        }
+    )
+}
+
+pub fn on_update(on_update: bool, length: Option<&str>) -> String {
+    let l = length.unwrap();
+    if on_update {
+        if !l.is_empty() {
+            format!(" ON UPDATE CURRENT_TIMESTAMP ({})", l)
+        } else {
+            format!(" ON UPDATE CURRENT_TIMESTAMP")
+        }
+    } else {
+        String::from("")
+    }
+}
+
+pub fn comment(comment: Option<&str>) -> String {
+    let c = comment.unwrap();
+    if !c.is_empty() {
+        format!(" COMMENT '{}'", c)
+    } else {
+        String::from("")
     }
 }
 
@@ -983,6 +1008,15 @@ pub fn get_mysql_field_value(field: &Field, row: &MySqlRow) -> Option<String> {
 
     match field {
         Field::VarChar(_) | Field::Char(_) => get_value::<String>(col_name, row),
+        Field::Binary(_)
+        | Field::VarBinary(_)
+        | Field::Blob(_)
+        | Field::TinyBlob(_)
+        | Field::MediumBlob(_)
+        | Field::LongBlob(_) => {
+            let i: Option<Vec<u8>> = row.try_get(col_name).unwrap();
+            i.map(|i| String::from_utf8(i).unwrap_or_default())
+        }
         Field::TinyInt(field) => get_numeric::<i8, u8>(col_name, field.unsigned, row),
         Field::SmallInt(field) => get_numeric::<i16, u16>(col_name, field.unsigned, row),
         Field::MediumInt(field) => get_numeric::<i32, u32>(col_name, field.unsigned, row),
@@ -1061,7 +1095,7 @@ pub fn get_mysql_column_value(column: &MySqlColumn, row: &MySqlRow) -> Option<St
             let d: Option<DateTime<Utc>> = row.try_get(col_name).unwrap();
             d.map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
         }
-        _ => Some(column.type_info().name().to_string()),
+        _ => None,
     }
 }
 pub fn convert_show_column_to_mysql_fields(fields: Vec<MySqlRow>) -> Vec<Field> {
@@ -1070,7 +1104,7 @@ pub fn convert_show_column_to_mysql_fields(fields: Vec<MySqlRow>) -> Vec<Field> 
         .map(|r| {
             let kind: String = r.try_get("Type").unwrap();
             let reg = Regex::new(
-                r"(?P<kind>bigint|binary|bit|blob|char|datetime|date|decimal|double|enum|float|geometry|geometrycollection|int|integer|json|linestring|longblob|longtext|mediumblob|mediumint|mediumtext|multilinestring|multipoint|multipolygon|numeric|point|polygon|real|set|smallint|text|timestamp|time|tinyblob|tinyint|tinytext|varbinary|varchar|year)(\((?P<length>\d+)\))?(\((?P<num>\d+),(?P<decimal>\d+)\))?(\((?P<options>('.+',?)+)\))?(\s(?P<unsigned>unsigned))?(\s(?P<zerofill>zerofill))?",
+                r"(?P<kind>bigint|binary|bit|blob|char|datetime|date|decimal|double|enum|float|geometry|geomcollection|int|integer|json|linestring|longblob|longtext|mediumblob|mediumint|mediumtext|multilinestring|multipoint|multipolygon|numeric|point|polygon|real|set|smallint|text|timestamp|time|tinyblob|tinyint|tinytext|varbinary|varchar|year)(\((?P<length>\d+)\))?(\((?P<num>\d+),(?P<decimal>\d+)\))?(\((?P<options>('.+',?)+)\))?(\s(?P<unsigned>unsigned))?(\s(?P<zerofill>zerofill))?",
             )
             .unwrap();
             let caps = reg.captures(kind.as_str()).unwrap();
@@ -1377,7 +1411,7 @@ pub fn convert_show_column_to_mysql_fields(fields: Vec<MySqlRow>) -> Vec<Field> 
                     name.as_str(),
                     not_null,
                     key,
-                    None,
+                    comment.as_deref(),
                     default.as_deref(),
                 )),
             }

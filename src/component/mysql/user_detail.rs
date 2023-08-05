@@ -5,7 +5,8 @@ use crate::{
     event::{config::*, Key},
     model::mysql::{
         get_mysql_user, get_mysql_user_member_ofs, get_mysql_user_members,
-        get_mysql_user_privileges, get_mysql_users, Connections, Privilege, User, UserMember,
+        get_mysql_user_privileges, get_mysql_users, get_mysql_version, Connections, Privilege,
+        User, UserMember, Version,
     },
     pool::{execute_mysql_query_unprepared, fetch_mysql_query, get_mysql_pool, MySQLPools},
     widget::{Form, FormItem},
@@ -17,7 +18,7 @@ use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::Spans,
     widgets::{Block, BorderType, Borders, Row as RowUI, Table, TableState, Tabs},
     Frame,
 };
@@ -36,6 +37,7 @@ enum PanelKind {
 
 pub struct UserDetailComponent<'a> {
     conn_id: Option<Uuid>,
+    db_version: Version,
     old_user: Option<User>,
     info_dlg: Option<ConfirmDialog>,
     exit_dlg: Option<ConfirmDialog>,
@@ -99,6 +101,7 @@ impl<'a> UserDetailComponent<'a> {
 
         UserDetailComponent {
             conn_id: None,
+            db_version: Version::Eight,
             old_user: None,
             info_dlg: None,
             exit_dlg: None,
@@ -131,6 +134,8 @@ impl<'a> UserDetailComponent<'a> {
         user_name: Option<&str>,
     ) -> Result<()> {
         self.conn_id = Some(*conn_id);
+        self.db_version =
+            get_mysql_version(self.conns.clone(), self.pools.clone(), conn_id).await?;
         let pool = get_mysql_pool(
             self.conns.clone(),
             self.pools.clone(),
@@ -138,7 +143,7 @@ impl<'a> UserDetailComponent<'a> {
             None,
         )
         .await?;
-        let all_users = get_mysql_users(&pool).await?;
+        let mut all_users = get_mysql_users(&pool).await?;
         let plugins = fetch_mysql_query(
             self.conns.clone(),
             self.pools.clone(),
@@ -156,45 +161,47 @@ impl<'a> UserDetailComponent<'a> {
             let user = get_mysql_user(&pool, host_name, user_name).await?;
             self.old_user = Some(user.clone());
 
-            let member_ofs = get_mysql_user_member_ofs(&pool, host_name, user_name).await?;
-            let members = get_mysql_user_members(&pool, host_name, user_name).await?;
+            if matches!(self.db_version, Version::Eight) {
+                let member_ofs = get_mysql_user_member_ofs(&pool, host_name, user_name).await?;
+                let members = get_mysql_user_members(&pool, host_name, user_name).await?;
+                all_users.retain(|u| u.name() != user_name || u.host() != host_name);
+                self.member_ofs = all_users
+                    .iter()
+                    .map(|u| {
+                        let same_um = member_ofs.iter().find(|m| {
+                            m.member_host.as_ref().unwrap() == user.host()
+                                && m.member_name.as_ref().unwrap() == user.name()
+                        });
+                        UserMember {
+                            user_host: Some(u.host().to_string()),
+                            user_name: Some(u.name().to_string()),
+                            member_host: Some(user.host().to_string()),
+                            member_name: Some(user.name().to_string()),
+                            granted: same_um.is_some(),
+                        }
+                    })
+                    .collect();
 
-            self.member_ofs = all_users
-                .iter()
-                .map(|u| {
-                    let same_um = member_ofs.iter().find(|m| {
-                        m.member_host.as_ref().unwrap() == user.host()
-                            && m.member_name.as_ref().unwrap() == user.name()
-                    });
-                    UserMember {
-                        user_host: Some(u.host().to_string()),
-                        user_name: Some(u.name().to_string()),
-                        member_host: Some(user.host().to_string()),
-                        member_name: Some(user.name().to_string()),
-                        granted: same_um.is_some(),
-                    }
-                })
-                .collect();
+                self.old_member_ofs = self.member_ofs.clone();
 
-            self.old_member_ofs = self.member_ofs.clone();
-
-            self.members = all_users
-                .iter()
-                .map(|u| {
-                    let same_um = members.iter().find(|m| {
-                        m.user_host.as_ref().unwrap() == user.host()
-                            && m.user_name.as_ref().unwrap() == user.name()
-                    });
-                    UserMember {
-                        user_host: Some(user.host().to_string()),
-                        user_name: Some(user.name().to_string()),
-                        member_host: Some(u.host().to_string()),
-                        member_name: Some(u.name().to_string()),
-                        granted: same_um.is_some(),
-                    }
-                })
-                .collect();
-            self.old_members = self.members.clone();
+                self.members = all_users
+                    .iter()
+                    .map(|u| {
+                        let same_um = members.iter().find(|m| {
+                            m.user_host.as_ref().unwrap() == user.host()
+                                && m.user_name.as_ref().unwrap() == user.name()
+                        });
+                        UserMember {
+                            user_host: Some(user.host().to_string()),
+                            user_name: Some(user.name().to_string()),
+                            member_host: Some(u.host().to_string()),
+                            member_name: Some(u.name().to_string()),
+                            granted: same_um.is_some(),
+                        }
+                    })
+                    .collect();
+                self.old_members = self.members.clone();
+            }
             self.form.set_items(vec![
                 FormItem::new_input("Name".to_string(), Some(user.name()), false, false, false),
                 FormItem::new_input("Host".to_string(), Some(user.host()), false, false, false),
@@ -276,26 +283,28 @@ impl<'a> UserDetailComponent<'a> {
             self.privileges = get_mysql_user_privileges(&pool, host_name, user_name).await?;
             self.old_privileges = self.privileges.clone();
         } else {
-            self.member_ofs = all_users
-                .iter()
-                .map(|u| UserMember {
-                    user_host: Some(u.host().to_string()),
-                    user_name: Some(u.name().to_string()),
-                    member_host: None,
-                    member_name: None,
-                    granted: false,
-                })
-                .collect();
-            self.members = all_users
-                .iter()
-                .map(|u| UserMember {
-                    user_host: None,
-                    user_name: None,
-                    member_host: Some(u.host().to_string()),
-                    member_name: Some(u.name().to_string()),
-                    granted: false,
-                })
-                .collect();
+            if matches!(self.db_version, Version::Eight) {
+                self.member_ofs = all_users
+                    .iter()
+                    .map(|u| UserMember {
+                        user_host: Some(u.host().to_string()),
+                        user_name: Some(u.name().to_string()),
+                        member_host: None,
+                        member_name: None,
+                        granted: false,
+                    })
+                    .collect();
+                self.members = all_users
+                    .iter()
+                    .map(|u| UserMember {
+                        user_host: None,
+                        user_name: None,
+                        member_host: Some(u.host().to_string()),
+                        member_name: Some(u.name().to_string()),
+                        granted: false,
+                    })
+                    .collect();
+            }
             self.form.set_items(vec![
                 FormItem::new_input("Name".to_string(), None, false, false, false),
                 FormItem::new_input("Host".to_string(), None, false, false, false),
@@ -348,34 +357,48 @@ impl<'a> UserDetailComponent<'a> {
                 vertical: 1,
                 horizontal: 1,
             }));
-        let selected = match self.panel {
-            PanelKind::General => 0,
-            PanelKind::Advanced => 1,
-            PanelKind::MemberOf => 2,
-            PanelKind::Members => 3,
-            PanelKind::ServerPrivs => 4,
-            PanelKind::Privileges => 5,
-            PanelKind::SQLPreview => 6,
+        let selected = match self.db_version {
+            Version::Eight => match self.panel {
+                PanelKind::General => 0,
+                PanelKind::Advanced => 1,
+                PanelKind::MemberOf => 2,
+                PanelKind::Members => 3,
+                PanelKind::ServerPrivs => 4,
+                PanelKind::Privileges => 5,
+                PanelKind::SQLPreview => 6,
+            },
+            Version::Five => match self.panel {
+                PanelKind::General => 0,
+                PanelKind::Advanced => 1,
+                PanelKind::ServerPrivs => 2,
+                PanelKind::Privileges => 3,
+                PanelKind::SQLPreview => 4,
+                _ => 0,
+            },
+        };
+        let tabs = match self.db_version {
+            Version::Eight => vec![
+                Spans::from("General"),
+                Spans::from("Advanced"),
+                Spans::from("Member Of"),
+                Spans::from("Memebers"),
+                Spans::from("Server Privileges"),
+                Spans::from("Privileges"),
+                Spans::from("SQL Preview"),
+            ],
+            Version::Five => vec![
+                Spans::from("General"),
+                Spans::from("Advanced"),
+                Spans::from("Server Privileges"),
+                Spans::from("Privileges"),
+                Spans::from("SQL Preview"),
+            ],
         };
         f.render_widget(
-            Tabs::new(
-                [
-                    Span::raw("General"),
-                    Span::raw("Advanced"),
-                    Span::raw("Member Of"),
-                    Span::raw("Memebers"),
-                    Span::raw("Server Privileges"),
-                    Span::raw("Privileges"),
-                    Span::raw("SQL Preview"),
-                ]
-                .iter()
-                .cloned()
-                .map(Spans::from)
-                .collect(),
-            )
-            .block(Block::default().borders(Borders::BOTTOM))
-            .highlight_style(Style::default().fg(Color::Green))
-            .select(selected),
+            Tabs::new(tabs)
+                .block(Block::default().borders(Borders::BOTTOM))
+                .highlight_style(Style::default().fg(Color::Green))
+                .select(selected),
             chunks[0],
         );
         match self.panel {
@@ -418,8 +441,8 @@ impl<'a> UserDetailComponent<'a> {
     {
         let table = Table::new(self.member_ofs.iter().map(|rm| {
             RowUI::new(vec![
-                rm.user_name.as_deref().unwrap(),
-                self.bool_str(rm.granted),
+                format!("{}@{}", rm.user_name().unwrap(), rm.user_host().unwrap()),
+                String::from(self.bool_str(rm.granted)),
             ])
         }))
         .header(RowUI::new(vec!["User Name", "Granted"]))
@@ -434,8 +457,8 @@ impl<'a> UserDetailComponent<'a> {
     {
         let table = Table::new(self.members.iter().map(|m| {
             RowUI::new(vec![
-                m.member_name.as_deref().unwrap(),
-                self.bool_str(m.granted),
+                format!("{}@{}", m.member_name().unwrap(), m.member_host().unwrap()),
+                String::from(self.bool_str(m.granted)),
             ])
         }))
         .header(RowUI::new(vec!["User Name", "Granted"]))
@@ -464,7 +487,6 @@ impl<'a> UserDetailComponent<'a> {
                 self.bool_str(p.create_view),
                 self.bool_str(p.delete),
                 self.bool_str(p.drop),
-                self.bool_str(p.grant_option),
                 self.bool_str(p.index),
                 self.bool_str(p.insert),
                 self.bool_str(p.references),
@@ -482,7 +504,6 @@ impl<'a> UserDetailComponent<'a> {
             "Create View",
             "Delete",
             "Drop",
-            "Grant Option",
             "Index",
             "Insert",
             "References",
@@ -583,6 +604,11 @@ impl<'a> UserDetailComponent<'a> {
     fn handle_info_dlg_event(&mut self, key: &Key) -> Result<ComponentResult> {
         if let Some(dlg) = self.info_dlg.as_mut() {
             dlg.handle_event(key);
+
+            self.old_user = Some(self.get_input_user()?.clone());
+            self.old_members = self.members.clone();
+            self.old_member_ofs = self.member_ofs.clone();
+            self.old_privileges = self.privileges.clone();
             self.info_dlg = None;
         }
         Ok(ComponentResult::Done)
@@ -597,6 +623,7 @@ impl<'a> UserDetailComponent<'a> {
                     if let Some(index) = self.privileges_state.selected() {
                         self.privileges.remove(index);
                         self.delete_privilege_dlg = None;
+                        self.privileges_state.select(None);
                     }
                 }
                 _ => (),
@@ -626,7 +653,6 @@ impl<'a> UserDetailComponent<'a> {
                         create_view: map.get("create view").unwrap().as_ref().unwrap() == "true",
                         delete: map.get("delete").unwrap().as_ref().unwrap() == "true",
                         drop: map.get("drop").unwrap().as_ref().unwrap() == "true",
-                        grant_option: map.get("grant option").unwrap().as_ref().unwrap() == "true",
                         index: map.get("index").unwrap().as_ref().unwrap() == "true",
                         insert: map.get("insert").unwrap().as_ref().unwrap() == "true",
                         references: map.get("references").unwrap().as_ref().unwrap() == "true",
@@ -687,46 +713,59 @@ impl<'a> UserDetailComponent<'a> {
         Ok(ComponentResult::Done)
     }
     async fn handle_main_event(&mut self, key: &Key) -> Result<ComponentResult> {
-        if matches!(*key, BACK_KEY) {
-            self.handle_back_event()
-        } else if matches!(*key, SAVE_KEY) {
-            self.handle_save_event().await
-        } else {
-            match self.panel {
-                PanelKind::General => self.handle_panel_general_event(key),
-                PanelKind::Advanced => self.handle_panel_advanced_event(key),
-                PanelKind::MemberOf => self.handle_panel_member_of_event(key),
-                PanelKind::Members => self.handle_panel_members_event(key),
-                PanelKind::Privileges => self.handle_panel_privileges_event(key).await,
-                PanelKind::ServerPrivs => self.handle_panel_server_privileges_event(key),
-                PanelKind::SQLPreview => self.handle_panel_sql_preview_event(key),
-            }
+        match self.panel {
+            PanelKind::General => self.handle_panel_general_event(key).await,
+            PanelKind::Advanced => self.handle_panel_advanced_event(key).await,
+            PanelKind::MemberOf => self.handle_panel_member_of_event(key).await,
+            PanelKind::Members => self.handle_panel_members_event(key).await,
+            PanelKind::Privileges => self.handle_panel_privileges_event(key).await,
+            PanelKind::ServerPrivs => self.handle_panel_server_privileges_event(key).await,
+            PanelKind::SQLPreview => self.handle_panel_sql_preview_event(key).await,
         }
     }
-    fn handle_panel_general_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_general_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_LEFT_KEY => self.panel = PanelKind::SQLPreview,
             TAB_RIGHT_KEY => self.panel = PanelKind::Advanced,
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             _ => {
-                self.form.handle_event(key)?;
+                if let DialogResult::Cancel = self.form.handle_event(key)? {
+                    self.handle_back_event()?;
+                };
             }
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_advanced_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_advanced_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_LEFT_KEY => self.panel = PanelKind::General,
-            TAB_RIGHT_KEY => self.panel = PanelKind::MemberOf,
+            TAB_RIGHT_KEY => match self.db_version {
+                Version::Eight => self.panel = PanelKind::MemberOf,
+                Version::Five => self.panel = PanelKind::ServerPrivs,
+            },
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             _ => {
-                self.adv_form.handle_event(key)?;
+                if let DialogResult::Cancel = self.adv_form.handle_event(key)? {
+                    self.handle_back_event()?;
+                }
             }
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_member_of_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_member_of_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_LEFT_KEY => self.panel = PanelKind::Advanced,
             TAB_RIGHT_KEY => self.panel = PanelKind::Members,
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             UP_KEY => {
                 if !self.member_ofs.is_empty() {
                     let index = get_table_up_index(self.member_ofs_state.selected());
@@ -751,10 +790,16 @@ impl<'a> UserDetailComponent<'a> {
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_members_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_members_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_LEFT_KEY => self.panel = PanelKind::MemberOf,
             TAB_RIGHT_KEY => self.panel = PanelKind::ServerPrivs,
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             UP_KEY => {
                 if !self.members.is_empty() {
                     let index = get_table_up_index(self.members_state.selected());
@@ -777,10 +822,19 @@ impl<'a> UserDetailComponent<'a> {
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_server_privileges_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_server_privileges_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
-            TAB_LEFT_KEY => self.panel = PanelKind::Members,
+            TAB_LEFT_KEY => match self.db_version {
+                Version::Eight => self.panel = PanelKind::Members,
+                Version::Five => self.panel = PanelKind::Advanced,
+            },
             TAB_RIGHT_KEY => self.panel = PanelKind::Privileges,
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             UP_KEY => {
                 let index = get_table_up_index(self.srv_priv_state.selected());
                 self.srv_priv_state.select(Some(index));
@@ -806,6 +860,12 @@ impl<'a> UserDetailComponent<'a> {
         match *key {
             TAB_LEFT_KEY => self.panel = PanelKind::ServerPrivs,
             TAB_RIGHT_KEY => self.panel = PanelKind::SQLPreview,
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             UP_KEY => {
                 if !self.privileges.is_empty() {
                     let index = get_table_up_index(self.privileges_state.selected());
@@ -857,8 +917,14 @@ impl<'a> UserDetailComponent<'a> {
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_sql_preview_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_sql_preview_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             TAB_LEFT_KEY => self.panel = PanelKind::Privileges,
             TAB_RIGHT_KEY => self.panel = PanelKind::General,
             _ => (),
@@ -867,6 +933,7 @@ impl<'a> UserDetailComponent<'a> {
     }
     fn clear(&mut self) {
         self.conn_id = None;
+        self.db_version = Version::Eight;
         self.old_user = None;
         self.info_dlg = None;
         self.exit_dlg = None;
@@ -926,13 +993,21 @@ impl<'a> UserDetailComponent<'a> {
             ));
         }
         let pwd_ddl = if let Some(pwd) = user.password() {
-            format!(" BY '{}'", pwd)
+            if !pwd.is_empty() {
+                format!(" BY '{}'", pwd)
+            } else {
+                String::new()
+            }
         } else {
             String::new()
         };
         let plugin_ddl = if user.plugin() != old_user.plugin() && user.plugin().is_some() {
             if let Some(plugin) = user.plugin() {
-                format!(" WITH {}", plugin)
+                if !plugin.is_empty() {
+                    format!(" WITH {}", plugin)
+                } else {
+                    String::new()
+                }
             } else {
                 String::new()
             }
@@ -948,27 +1023,35 @@ impl<'a> UserDetailComponent<'a> {
         let mut resource_ddl = Vec::new();
         if user.max_queries() != old_user.max_queries() {
             if let Some(mqph) = user.max_queries() {
-                resource_ddl.push(format!("MAX_QUERIES_PER_HOUR {}", mqph));
+                if !mqph.is_empty() {
+                    resource_ddl.push(format!("MAX_QUERIES_PER_HOUR {}", mqph));
+                }
             }
         }
         if user.max_updates() != old_user.max_updates() {
             if let Some(mupr) = user.max_updates() {
-                resource_ddl.push(format!("MAX_UPDATES_PER_HOUR {}", mupr));
+                if !mupr.is_empty() {
+                    resource_ddl.push(format!("MAX_UPDATES_PER_HOUR {}", mupr));
+                }
             }
         }
         if user.max_connections() != old_user.max_connections() {
             if let Some(mcph) = user.max_connections() {
-                resource_ddl.push(format!("MAX_CONNECTIONS_PER_HOUR {}", mcph));
+                if !mcph.is_empty() {
+                    resource_ddl.push(format!("MAX_CONNECTIONS_PER_HOUR {}", mcph));
+                }
             }
         }
         if user.max_user_connections() != old_user.max_user_connections() {
             if let Some(muc) = user.max_user_connections() {
-                resource_ddl.push(format!("MAX_USER_CONNECTIONS {}", muc));
+                if !muc.is_empty() {
+                    resource_ddl.push(format!("MAX_USER_CONNECTIONS {}", muc));
+                }
             }
         }
         if !pwd_ddl.is_empty() || !resource_ddl.is_empty() {
             ddl.push(format!(
-                "ALTER USER `{}`@`{}` {}{}",
+                "ALTER USER `{}`@`{}` {}{};",
                 user.name(),
                 user.host(),
                 identity_ddl,
@@ -1238,7 +1321,7 @@ impl<'a> UserDetailComponent<'a> {
         });
         if !srv_grant_ddl.is_empty() {
             ddl.push(format!(
-                "GRANT {} ON *.* TO `{}`@`{}`",
+                "GRANT {} ON *.* TO `{}`@`{}`;",
                 srv_grant_ddl.join(","),
                 user.name(),
                 user.host()
@@ -1246,7 +1329,7 @@ impl<'a> UserDetailComponent<'a> {
         }
         if !srv_revoke_ddl.is_empty() {
             ddl.push(format!(
-                "GRANT {} ON *.* TO `{}`@`{}`",
+                "REVOKE {} ON *.* FROM `{}`@`{}`;",
                 srv_revoke_ddl.join(","),
                 user.name(),
                 user.host()
@@ -1282,7 +1365,7 @@ impl<'a> UserDetailComponent<'a> {
                 .as_ref()
                 .map(|pwd| pwd.to_string()),
             max_queries: adv_map
-                .get("Max queires per hour")
+                .get("Max queries per hour")
                 .unwrap()
                 .as_ref()
                 .map(|mq| mq.parse().unwrap_or(0)),
@@ -1420,7 +1503,7 @@ impl<'a> UserDetailComponent<'a> {
             .filter(|mo| mo.granted)
             .map(|mo| {
                 format!(
-                    "GRANT `{}`@`{}` TO `{}`@`{}`",
+                    "GRANT `{}`@`{}` TO `{}`@`{}`;",
                     mo.user_name.as_ref().unwrap(),
                     mo.user_host.as_ref().unwrap(),
                     name,
@@ -1434,7 +1517,7 @@ impl<'a> UserDetailComponent<'a> {
             .filter(|ms| ms.granted)
             .map(|ms| {
                 format!(
-                    "GRANT `{}`@`{}` TO `{}`@`{}`",
+                    "GRANT `{}`@`{}` TO `{}`@`{}`;",
                     name,
                     host,
                     ms.member_name.as_ref().unwrap(),
@@ -1444,28 +1527,28 @@ impl<'a> UserDetailComponent<'a> {
             .collect();
 
         let mut resource_opts = Vec::new();
-        if let Some(mqph) = adv_map.get("Max queries per hour") {
-            if let Some(mqph) = mqph {
-                resource_opts.push(mqph.to_string());
+        if let Some(mqph) = adv_map.get("Max queries per hour").unwrap() {
+            if !mqph.is_empty() {
+                resource_opts.push(format!("MAX_QUERIES_PER_HOUR {}", mqph));
             }
         }
-        if let Some(mupr) = adv_map.get("Max updates per hour") {
-            if let Some(mupr) = mupr {
-                resource_opts.push(mupr.to_string());
+        if let Some(mupr) = adv_map.get("Max updates per hour").unwrap() {
+            if !mupr.is_empty() {
+                resource_opts.push(format!("MAX_UPDATES_PER_HOUR {}", mupr));
             }
         }
-        if let Some(mcph) = adv_map.get("Max connections per hour") {
-            if let Some(mcph) = mcph {
-                resource_opts.push(mcph.to_string());
+        if let Some(mcph) = adv_map.get("Max connections per hour").unwrap() {
+            if !mcph.is_empty() {
+                resource_opts.push(format!("MAX_CONNECTIONS_PER_HOUR {}", mcph));
             }
         }
-        if let Some(muc) = adv_map.get("Max user connections") {
-            if let Some(muc) = muc {
-                resource_opts.push(muc.to_string());
+        if let Some(muc) = adv_map.get("Max user connections").unwrap() {
+            if !muc.is_empty() {
+                resource_opts.push(format!("MAX_USER_CONNECTIONS {}", muc));
             }
         }
-        let pwd_ddl = if let Some(pwd) = map.get("Password") {
-            if let Some(pwd) = pwd {
+        let pwd_ddl = if let Some(pwd) = map.get("Password").unwrap() {
+            if !pwd.is_empty() {
                 format!(" BY '{}'", pwd)
             } else {
                 String::new()
@@ -1473,8 +1556,8 @@ impl<'a> UserDetailComponent<'a> {
         } else {
             String::new()
         };
-        let plugin_ddl = if let Some(plugin) = map.get("Plugin") {
-            if let Some(plugin) = plugin {
+        let plugin_ddl = if let Some(plugin) = map.get("Plugin").unwrap() {
+            if !plugin.is_empty() {
                 format!(" WITH {}", plugin)
             } else {
                 String::new()
@@ -1490,7 +1573,7 @@ impl<'a> UserDetailComponent<'a> {
         };
 
         let user_ddl = format!(
-            "CREATE USER `{}`@`{}`{}{}",
+            "CREATE USER `{}`@`{}`{}{};",
             name,
             host,
             identity_ddl,
@@ -1520,9 +1603,6 @@ impl<'a> UserDetailComponent<'a> {
                 if p.drop {
                     p_str.push("Drop");
                 }
-                if p.grant_option {
-                    p_str.push("Grant Option");
-                }
                 if p.index {
                     p_str.push("Index");
                 }
@@ -1545,7 +1625,7 @@ impl<'a> UserDetailComponent<'a> {
                     p_str.push("Update");
                 }
                 format!(
-                    "GRANT {} ON `{}`.`{}` TO `{}`@`{}`",
+                    "GRANT {} ON `{}`.`{}` TO `{}`@`{}`;",
                     p_str.join(","),
                     p.db,
                     p.name,
@@ -1563,7 +1643,7 @@ impl<'a> UserDetailComponent<'a> {
 
         let srv_privs_ddl = if !srv_privs.is_empty() {
             format!(
-                "GRANT {} ON *.* TO `{}`@`{}`",
+                "GRANT {} ON *.* TO `{}`@`{}`;",
                 srv_privs.join(","),
                 name,
                 host

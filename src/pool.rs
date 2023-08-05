@@ -187,9 +187,9 @@ pub async fn fetch_one_pg(
     conn_id: &Uuid,
     db_name: Option<&str>,
     sql: &str,
-) -> Result<PgRow> {
+) -> Result<Option<PgRow>> {
     let pool = get_pg_pool(conns.clone(), pools, conn_id, db_name).await?;
-    let result = sqlx::query(sql).fetch_one(&pool).await;
+    let result = sqlx::query(sql).fetch_optional(&pool).await;
     match result {
         Ok(v) => Ok(v),
         Err(e) => Err(Error::from(e)),

@@ -165,6 +165,7 @@ impl TableListComponent {
                         .await?;
                         self.tables.remove(index);
                         self.delete_dlg = None;
+                        self.state.select(None);
                     }
                 }
                 _ => (),
@@ -219,7 +220,7 @@ impl TableListComponent {
                 self.delete_dlg = Some(ConfirmDialog::new(
                     ConfirmKind::Warning,
                     "Delete Table",
-                    "Are you sure to delete this table?",
+                    "All the data in this table will be lost!!!Are you sure to delete this table? ",
                 ));
             }
             REFRESH_KEY => {

@@ -65,34 +65,64 @@ impl ForeignKey {
     pub fn comment(&self) -> Option<&str> {
         self.comment.as_deref()
     }
-    pub fn get_create_ddl(&self) -> String {
-        format!(
-            "CONSTRAINT \"{}\" FOREIGN KEY (\"{}\") REFERENCES \"{}\".\"{}\" (\"{}\"){}{}",
-            self.name(),
-            self.field(),
-            self.ref_schema(),
-            self.ref_table(),
-            self.ref_field(),
-            if let Some(d) = self.on_delete() {
-                format!(" ON DELETE {}", d)
-            } else {
-                String::from("")
-            },
-            if let Some(u) = self.on_update() {
-                format!(" ON UPDATE {}", u)
-            } else {
-                String::from("")
-            },
+    pub fn get_create_ddl(&self, schema_name: &str, table_name: &str) -> (String, Option<String>) {
+        (
+            format!(
+                "CONSTRAINT \"{}\" FOREIGN KEY (\"{}\") REFERENCES \"{}\".\"{}\" (\"{}\"){}{}",
+                self.name(),
+                self.field(),
+                self.ref_schema(),
+                self.ref_table(),
+                self.ref_field(),
+                if let Some(d) = self.on_delete() {
+                    format!(" ON DELETE {}", d)
+                } else {
+                    String::from("")
+                },
+                if let Some(u) = self.on_update() {
+                    format!(" ON UPDATE {}", u)
+                } else {
+                    String::from("")
+                },
+            ),
+            self.comment().map(|c| {
+                format!(
+                    "COMMENT ON CONSTRAINT \"{}\" ON \"{}\".\"{}\" IS '{}';",
+                    self.name(),
+                    schema_name,
+                    table_name,
+                    c
+                )
+            }),
         )
     }
-    pub fn get_add_ddl(&self) -> String {
-        format!("ADD {}", self.get_create_ddl())
+    pub fn get_add_ddl(&self, schema_name: &str, table_name: &str) -> (String, Option<String>) {
+        let (fk_ddl, comment_ddl) = self.get_create_ddl(schema_name, table_name);
+        (format!("ADD {}", fk_ddl), comment_ddl)
     }
     pub fn get_drop_ddl(&self) -> String {
         format!("DROP CONSTRAINT \"{}\"", self.name)
     }
-    pub fn get_alter_ddl(&self) -> Vec<String> {
-        vec![]
+    pub fn get_alter_ddl(
+        &self,
+        old: &ForeignKey,
+        schema_name: &str,
+        table_name: &str,
+    ) -> (Vec<String>, Option<String>) {
+        (
+            vec![],
+            if old.comment != self.comment {
+                Some(format!(
+                    r#"COMMENT ON CONSTRAINT "{}" ON "{}"."{}" IS '{}'"#,
+                    self.name(),
+                    schema_name,
+                    table_name,
+                    self.comment().unwrap_or("")
+                ))
+            } else {
+                None
+            },
+        )
     }
     pub fn get_rename_ddl(&self, other: &ForeignKey, table_name: &str) -> Vec<String> {
         let mut ddl = Vec::new();
@@ -131,7 +161,7 @@ pub fn convert_show_fk_to_pg_fk(schema_name: &str, rows: Vec<PgRow>) -> Vec<Fore
                 ref_field: ref_field.to_string(),
                 on_delete: on_delete.map(|d| OnDeleteKind::try_from(d.as_str()).unwrap()),
                 on_update: on_update.map(|u| OnUpdateKind::try_from(u.as_str()).unwrap()),
-                comment: None,
+                comment: row.try_get("comment").unwrap(),
             }
         })
         .collect()

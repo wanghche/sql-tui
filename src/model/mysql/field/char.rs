@@ -68,14 +68,17 @@ impl CharField {
         self.comment.as_deref()
     }
     pub fn get_create_str(&self, kind: String) -> String {
-        let str = format!("`{}` {}", self.name, kind);
-        let str = length(&str, self.length.as_ref());
-        let str = character_set(&str, self.character_set.as_deref());
-        let str = collation(&str, self.collation.as_deref());
-        let str = not_null(&str, self.not_null);
-        let str = default_value(&str, self.default_value.as_ref(), true);
-        let str = comment(&str, self.comment.as_ref());
-        str
+        format!(
+            "`{}` {}{}{}{}{}{}{}",
+            self.name(),
+            kind,
+            length(self.length()),
+            character_set(self.character_set()),
+            collation(self.collation()),
+            not_null(self.not_null),
+            default_value(self.default_value(), true),
+            comment(self.comment()),
+        )
     }
     pub fn get_change_str(&self, kind: String, old: &CharField) -> Option<String> {
         if old.name != self.name

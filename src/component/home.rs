@@ -62,7 +62,6 @@ impl HomeComponent {
                 Spans::from("\n"),
                 Spans::from("repository: https://github.com/wanghche/sql-tui"),
                 Spans::from("\n"),
-                Spans::from("email: wangch@gmail.com"),
             ])
             .wrap(Wrap{ trim: false })
             .alignment(Alignment::Center),

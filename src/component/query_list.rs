@@ -212,6 +212,7 @@ impl QueryListComponent {
                             .delete_query(self.query_list[index].id())?;
                         self.query_list.remove(index);
                         self.delete_dlg = None;
+                        self.state.select(None);
                     }
                 }
                 _ => (),

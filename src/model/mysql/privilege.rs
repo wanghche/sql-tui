@@ -13,7 +13,6 @@ pub struct Privilege {
     pub create_view: bool,
     pub delete: bool,
     pub drop: bool,
-    pub grant_option: bool,
     pub index: bool,
     pub insert: bool,
     pub references: bool,
@@ -40,9 +39,6 @@ impl Privilege {
         }
         if self.drop {
             privs.push("Drop");
-        }
-        if self.grant_option {
-            privs.push("Grant Option");
         }
         if self.index {
             privs.push("Index");
@@ -92,9 +88,6 @@ impl Privilege {
         if self.drop {
             actions.push("Drop");
         }
-        if self.grant_option {
-            actions.push("Grant Option");
-        }
         if self.index {
             actions.push("Index");
         }
@@ -130,7 +123,7 @@ impl Privilege {
         let mut grant_actions = Vec::new();
         let mut revoke_actions = Vec::new();
 
-        if self.alter != old.delete {
+        if self.alter != old.alter {
             if self.alter {
                 grant_actions.push("Alter");
             } else {
@@ -165,14 +158,7 @@ impl Privilege {
                 revoke_actions.push("Drop");
             }
         }
-        if self.grant_option {
-            if self.grant_option {
-                grant_actions.push("Grant Option");
-            } else {
-                revoke_actions.push("Grant Option");
-            }
-        }
-        if self.index {
+        if self.index != old.index {
             if self.index {
                 grant_actions.push("Index");
             } else {
@@ -235,7 +221,7 @@ impl Privilege {
         if !revoke_actions.is_empty() {
             ddl.push(format!(
                 "REVOKE {} ON `{}`.`{}` FROM `{}`@`{}`",
-                grant_actions.join(","),
+                revoke_actions.join(","),
                 self.db,
                 self.name,
                 user_name,
@@ -253,9 +239,8 @@ pub async fn get_mysql_user_privileges(
     let rows = sqlx::query(&format!("SHOW GRANTS FOR '{user_name}'@'{host_name}'"))
         .fetch_all(pool)
         .await?;
-
     let reg = Regex::new(
-        r"GRANT\s(?P<privs>([CREATE|ALTER|CREATE VIEW]+,?)+)\sON\s`(?P<db>\w+)`.`(?P<name>\w+)`",
+        r"^GRANT\s(?P<privs>((ALTER|CREATE VIEW|CREATE|DELETE|DROP|INDEX|INSERT|REFERENCES|SELECT|SHOW VIEW|TRIGGER|UPDATE|ALL PRIVILEGES),?\s?)+)\sON\s`(?P<db>\w+)`.`(?P<name>\w+)`",
     )
     .unwrap();
 
@@ -277,19 +262,18 @@ pub async fn get_mysql_user_privileges(
                 id: Uuid::new_v4(),
                 db: db.as_str().to_string(),
                 name: name.as_str().to_string(),
-                alter: privs.contains("ALTER"),
-                create: privs.contains("CREATE"),
-                create_view: privs.contains("CREATE VIEW"),
-                delete: privs.contains("DELETE"),
-                drop: privs.contains("DROP"),
-                grant_option: privs.contains("GRANT OPTION"),
-                index: privs.contains("INDEX"),
-                insert: privs.contains("INSERT"),
-                references: privs.contains("REFERENCES"),
-                select: privs.contains("SELECT"),
-                show_view: privs.contains("SHOW VIEW"),
-                trigger: privs.contains("TRIGGER"),
-                update: privs.contains("UPDATE"),
+                alter: privs.contains("ALTER") || privs.contains("ALL PRIVILEGES"),
+                create: privs.contains("CREATE") || privs.contains("ALL PRIVILEGES"),
+                create_view: privs.contains("CREATE VIEW") || privs.contains("ALL PRIVILEGES"),
+                delete: privs.contains("DELETE") || privs.contains("ALL PRIVILEGES"),
+                drop: privs.contains("DROP") || privs.contains("ALL PRIVILEGES"),
+                index: privs.contains("INDEX") || privs.contains("ALL PRIVILEGES"),
+                insert: privs.contains("INSERT") || privs.contains("ALL PRIVILEGES"),
+                references: privs.contains("REFERENCES") || privs.contains("ALL PRIVILEGES"),
+                select: privs.contains("SELECT") || privs.contains("ALL PRIVILEGES"),
+                show_view: privs.contains("SHOW VIEW") || privs.contains("ALL PRIVILEGES"),
+                trigger: privs.contains("TRIGGER") || privs.contains("ALL PRIVILEGES"),
+                update: privs.contains("UPDATE") || privs.contains("ALL PRIVILEGES"),
             }
         })
         .collect::<Vec<Privilege>>())

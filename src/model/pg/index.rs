@@ -316,7 +316,7 @@ pub fn convert_show_index_to_pg_indexes(rows: Vec<PgRow>) -> Vec<Index> {
                 index_method: create_captures.name("m").map(|method| IndexMethod::try_from(method.as_str()).unwrap()),
                 unique: create_captures.name("u").is_some(),
                 concurrent: create_captures.name("c").is_some(),
-                comment: None,
+                comment: row.try_get("comment").unwrap(),
             }
         })
         .collect::<Vec<Index>>()

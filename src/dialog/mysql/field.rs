@@ -32,7 +32,7 @@ impl<'a> FieldDialog<'a> {
         conn_id: &Uuid,
     ) -> Result<FieldDialog<'a>> {
         let mut form = Form::default();
-        form.set_title(kind.to_string());
+        form.set_title(format!("{} field", kind.to_string()));
         let items = match kind {
             FieldKind::BigInt
             | FieldKind::Int
@@ -89,7 +89,7 @@ impl<'a> FieldDialog<'a> {
         conn_id: &Uuid,
     ) -> Result<FieldDialog<'a>> {
         let mut form = Form::default();
-        form.set_title(field.kind().to_string());
+        form.set_title(format!("{} field", field.kind()));
         let items = match field {
             Field::BigInt(i)
             | Field::Int(i)
@@ -257,7 +257,7 @@ impl<'a> FieldDialog<'a> {
                 FormItem::new_check("not null".to_string(), f.not_null(), false),
                 FormItem::new_check("key".to_string(), f.key(), false),
                 FormItem::new_input("comment".to_string(), f.comment(), true, false, false),
-                FormItem::new_input("length".to_string(), f.length(), true, false, false),
+                FormItem::new_input("length".to_string(), Some(f.length()), true, false, false),
                 FormItem::new_input(
                     "default value".to_string(),
                     f.default_value(),

@@ -66,7 +66,7 @@ impl ForeignKey {
     }
     pub fn get_create_ddl(&self) -> String {
         let mut sql = format!(
-            "CONSTRAINT `{}` FOREIGN KEY ({}) REFERENCES `{}`.`{}` ({})",
+            "CONSTRAINT `{}` FOREIGN KEY (`{}`) REFERENCES `{}`.`{}` (`{}`)",
             self.name, self.field, self.ref_db, self.ref_table, self.ref_field,
         );
         if let Some(update) = self.on_update.as_ref() {

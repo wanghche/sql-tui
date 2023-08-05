@@ -9,10 +9,11 @@ use crate::{
     event::{config::*, Key},
     model::mysql::{
         convert_show_column_to_mysql_fields, convert_show_fk_to_mysql_fk,
-        convert_show_index_to_mysql_indexes, BinaryField, CharField, Check, Connections, DateField,
-        DateTimeField, DecimalField, EnumField, Field, FieldKind, FloatField, ForeignKey, Index,
-        IndexField, IndexKind, IndexMethod, IntField, OnDeleteKind, OnUpdateKind, SimpleField,
-        TextField, TimeField, Trigger, TriggerAction, TriggerTime, Version,
+        convert_show_index_to_mysql_indexes, get_mysql_version, BinaryField, CharField, Check,
+        Connections, DateField, DateTimeField, DecimalField, EnumField, Field, FieldKind,
+        FloatField, ForeignKey, Index, IndexField, IndexKind, IndexMethod, IntField, OnDeleteKind,
+        OnUpdateKind, SimpleField, TextField, TimeField, Trigger, TriggerAction, TriggerTime,
+        Version,
     },
     pool::{execute_mysql_query_unprepared, fetch_mysql_query, fetch_one_mysql, MySQLPools},
     widget::{Form, FormItem, Select},
@@ -149,7 +150,8 @@ impl<'a> TableDetailComponent<'a> {
         self.conn_id = Some(*conn_id);
         self.db_name = Some(db_name.to_string());
         self.table_name = table_name.map(|s| s.to_string());
-        self.db_version = self.get_mysql_version(conn_id).await?;
+        self.db_version =
+            get_mysql_version(self.conns.clone(), self.pools.clone(), conn_id).await?;
 
         let engines = fetch_mysql_query(
             self.conns.clone(),
@@ -204,8 +206,7 @@ impl<'a> TableDetailComponent<'a> {
                 self.pools.clone(),
                 conn_id,
                 Some("information_schema"),
-                format!(
-                    "
+                format!("
                     SELECT 
                      K.CONSTRAINT_NAME,
                      K.COLUMN_NAME,
@@ -401,23 +402,6 @@ impl<'a> TableDetailComponent<'a> {
 
         Ok(())
     }
-    async fn get_mysql_version(&self, conn_id: &Uuid) -> Result<Version> {
-        let version: String = fetch_one_mysql(
-            self.conns.clone(),
-            self.pools.clone(),
-            conn_id,
-            None,
-            "SELECT VERSION()",
-        )
-        .await?
-        .try_get(0)
-        .unwrap();
-        if version.starts_with('8') {
-            Ok(Version::Eight)
-        } else {
-            Ok(Version::Five)
-        }
-    }
     pub fn draw<B>(&mut self, f: &mut Frame<B>, r: Rect, is_focus: bool) -> Result<()>
     where
         B: Backend,
@@ -425,7 +409,7 @@ impl<'a> TableDetailComponent<'a> {
         f.render_widget(
             Block::default()
                 .title(if let Some(name) = &self.table_name {
-                    format!("Edit `{}`", name)
+                    format!("Edit `{name}`")
                 } else {
                     "New Table".to_string()
                 })
@@ -726,7 +710,7 @@ impl<'a> TableDetailComponent<'a> {
 
         if !alter_ddl.is_empty() {
             ddl.push(format!(
-                "ALTER TABLE `{}`\n{}\n",
+                "ALTER TABLE `{}`\n{};",
                 self.table_name.as_ref().unwrap(),
                 alter_ddl.join(",\n")
             ));
@@ -768,6 +752,31 @@ impl<'a> TableDetailComponent<'a> {
             }
         });
         ddl.append(&mut drop_fields_str);
+        let old_key_fields = self
+            .old_fields
+            .iter()
+            .filter(|f| f.key())
+            .map(|f| f.name().to_string())
+            .collect::<Vec<String>>();
+        let key_fields = self
+            .fields
+            .iter()
+            .filter(|f| f.key())
+            .map(|f| f.name().to_string())
+            .collect::<Vec<String>>();
+        if old_key_fields != key_fields {
+            if !old_key_fields.is_empty() {
+                ddl.push(format!("DROP PRIMARY KEY"));
+            }
+            ddl.push(format!(
+                "ADD PRIMARY KEY ({})",
+                key_fields
+                    .iter()
+                    .map(|f| format!("`{}`", f))
+                    .collect::<Vec<String>>()
+                    .join(",")
+            ));
+        }
         ddl
     }
     fn build_index_alter_ddl(&self) -> Vec<String> {
@@ -972,49 +981,39 @@ impl<'a> TableDetailComponent<'a> {
     fn build_options_sql(&self) -> String {
         let map = self.form.get_data();
         let mut sql = "".to_string();
-        if let Some(engine) = map.get("engine") {
-            if let Some(engine) = engine {
+        if let Some(engine) = map.get("engine").unwrap() {
+            if !engine.is_empty() {
                 sql = format!("{}ENGINE {} ", sql, engine);
             }
         }
-        if let Some(avl) = map.get("avg row length") {
-            if let Some(avl) = avl {
+        if let Some(avl) = map.get("avg row length").unwrap() {
+            if !avl.is_empty() {
                 sql = format!("{}AVG_ROW_LENGTH = {} ", sql, avl);
             }
         }
-        if let Some(dcs) = map.get("default character set") {
-            if let Some(dcs) = dcs {
+        if let Some(dcs) = map.get("default character set").unwrap() {
+            if !dcs.is_empty() {
                 sql = format!("{}CHARACTER SET = {} ", sql, dcs);
             }
         }
-        if let Some(dc) = map.get("default collation") {
-            if let Some(dc) = dc {
+        if let Some(dc) = map.get("default collation").unwrap() {
+            if !dc.is_empty() {
                 sql = format!("{}COLLATE {} ", sql, dc);
             }
         }
-        if let Some(kbs) = map.get("key block size") {
-            if let Some(kbs) = kbs {
+        if let Some(kbs) = map.get("key block size").unwrap() {
+            if !kbs.is_empty() {
                 sql = format!("{}KEY_BLOCK_SIZE = {} ", sql, kbs);
             }
         }
-        if let Some(mr) = map.get("max rows") {
-            if let Some(mr) = mr {
+        if let Some(mr) = map.get("max rows").unwrap() {
+            if !mr.is_empty() {
                 sql = format!("{}MAX_ROWS = {}", sql, mr);
             }
         }
-        if let Some(mr) = map.get("min rows") {
-            if let Some(mr) = mr {
+        if let Some(mr) = map.get("min rows").unwrap() {
+            if !mr.is_empty() {
                 sql = format!("{}MIN_ROWS = {}", sql, mr);
-            }
-        }
-        if let Some(rf) = map.get("row format") {
-            if let Some(rf) = rf {
-                sql = format!("{}ROW_FORMAT = {}", sql, rf);
-            }
-        }
-        if let Some(ts) = map.get("table space") {
-            if let Some(ts) = ts {
-                sql = format!("{}TABLESPACE = `{}` ", sql, ts);
             }
         }
         if !self.comment.is_empty() {
@@ -1242,22 +1241,15 @@ impl<'a> TableDetailComponent<'a> {
     }
     fn handle_info_dlg_event(&mut self, key: &Key) -> Result<ComponentResult> {
         if let Some(dlg) = self.info_dlg.as_mut() {
-            match dlg.handle_event(key) {
-                DialogResult::Cancel => {
-                    self.info_dlg = None;
-                }
-                DialogResult::Confirm(_) => {
-                    self.old_fields = self.fields.clone();
-                    self.old_indexes = self.indexes.clone();
-                    self.old_foreign_keys = self.foreign_keys.clone();
-                    self.old_triggers = self.triggers.clone();
-                    self.old_checks = self.checks.clone();
-                    self.old_form = self.form.clone();
-                    self.old_comment = self.comment.clone();
-                    self.info_dlg = None;
-                }
-                _ => (),
-            }
+            dlg.handle_event(key);
+            self.old_fields = self.fields.clone();
+            self.old_indexes = self.indexes.clone();
+            self.old_foreign_keys = self.foreign_keys.clone();
+            self.old_triggers = self.triggers.clone();
+            self.old_checks = self.checks.clone();
+            self.old_form = self.form.clone();
+            self.old_comment = self.comment.clone();
+            self.info_dlg = None;
         }
         Ok(ComponentResult::Done)
     }
@@ -1511,7 +1503,7 @@ impl<'a> TableDetailComponent<'a> {
             not_null: map.get("not null").unwrap().as_ref().unwrap() == "true",
             key: map.get("key").unwrap().as_ref().unwrap() == "true",
             comment: map.get("comment").unwrap().as_ref().map(|s| s.to_string()),
-            length: map.get("length").unwrap().as_ref().map(|s| s.to_string()),
+            length: map.get("length").unwrap().as_ref().unwrap().to_string(),
             default_value: map
                 .get("default value")
                 .unwrap()
@@ -1873,21 +1865,15 @@ impl<'a> TableDetailComponent<'a> {
         Ok(ComponentResult::Done)
     }
     async fn handle_main_event(&mut self, key: &Key) -> Result<ComponentResult> {
-        if matches!(*key, BACK_KEY) {
-            self.handle_back_event()
-        } else if matches!(*key, SAVE_KEY) {
-            self.handle_save_event().await
-        } else {
-            match self.panel {
-                PanelKind::Fields => self.handle_panel_fields_event(key).await,
-                PanelKind::Indexes => self.handle_panel_indexes_event(key),
-                PanelKind::ForeignKeys => self.handle_panel_foreign_keys_event(key).await,
-                PanelKind::Triggers => self.handle_panel_triggers_event(key),
-                PanelKind::Checks => self.handle_panel_checks_event(key),
-                PanelKind::Options => self.handle_panel_options_event(key).await,
-                PanelKind::Comment => self.handle_panel_comment_event(key),
-                PanelKind::SQLPreview => self.handle_panel_sql_preview_event(key),
-            }
+        match self.panel {
+            PanelKind::Fields => self.handle_panel_fields_event(key).await,
+            PanelKind::Indexes => self.handle_panel_indexes_event(key).await,
+            PanelKind::ForeignKeys => self.handle_panel_foreign_keys_event(key).await,
+            PanelKind::Triggers => self.handle_panel_triggers_event(key).await,
+            PanelKind::Checks => self.handle_panel_checks_event(key).await,
+            PanelKind::Options => self.handle_panel_options_event(key).await,
+            PanelKind::Comment => self.handle_panel_comment_event(key).await,
+            PanelKind::SQLPreview => self.handle_panel_sql_preview_event(key).await,
         }
     }
     async fn handle_panel_fields_event(&mut self, key: &Key) -> Result<ComponentResult> {
@@ -1897,6 +1883,12 @@ impl<'a> TableDetailComponent<'a> {
             }
             TAB_LEFT_KEY => {
                 self.panel = PanelKind::SQLPreview;
+            }
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
             }
             UP_KEY => {
                 if !self.fields.is_empty() {
@@ -1944,13 +1936,19 @@ impl<'a> TableDetailComponent<'a> {
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_indexes_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_indexes_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_RIGHT_KEY => {
                 self.panel = PanelKind::ForeignKeys;
             }
             TAB_LEFT_KEY => {
                 self.panel = PanelKind::Fields;
+            }
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
             }
             UP_KEY => {
                 if !self.indexes.is_empty() {
@@ -1997,6 +1995,12 @@ impl<'a> TableDetailComponent<'a> {
             }
             TAB_LEFT_KEY => {
                 self.panel = PanelKind::Indexes;
+            }
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
             }
             UP_KEY => {
                 if !self.foreign_keys.is_empty() {
@@ -2052,7 +2056,7 @@ impl<'a> TableDetailComponent<'a> {
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_triggers_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_triggers_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_RIGHT_KEY => match self.db_version {
                 Version::Eight => self.panel = PanelKind::Checks,
@@ -2060,6 +2064,12 @@ impl<'a> TableDetailComponent<'a> {
             },
             TAB_LEFT_KEY => {
                 self.panel = PanelKind::ForeignKeys;
+            }
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
             }
             UP_KEY => {
                 if !self.triggers.is_empty() {
@@ -2095,13 +2105,19 @@ impl<'a> TableDetailComponent<'a> {
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_checks_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_checks_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_RIGHT_KEY => {
                 self.panel = PanelKind::Options;
             }
             TAB_LEFT_KEY => {
                 self.panel = PanelKind::Triggers;
+            }
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
             }
             UP_KEY => {
                 if !self.checks.is_empty() {
@@ -2139,13 +2155,16 @@ impl<'a> TableDetailComponent<'a> {
     }
     async fn handle_panel_options_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             TAB_LEFT_KEY => match self.db_version {
                 Version::Eight => self.panel = PanelKind::Checks,
                 Version::Five => self.panel = PanelKind::Triggers,
             },
             TAB_RIGHT_KEY => self.panel = PanelKind::Comment,
-            _ => {
-                if let DialogResult::Changed(name, selected) = self.form.handle_event(key)? {
+            _ => match self.form.handle_event(key)? {
+                DialogResult::Changed(name, selected) => {
                     if name == "default character set" {
                         let collations = fetch_mysql_query(
                             self.conns.clone(),
@@ -2170,14 +2189,24 @@ impl<'a> TableDetailComponent<'a> {
                         );
                     }
                 }
-            }
+                DialogResult::Cancel => {
+                    self.handle_back_event()?;
+                }
+                _ => (),
+            },
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_comment_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_comment_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_LEFT_KEY => self.panel = PanelKind::Options,
             TAB_RIGHT_KEY => self.panel = PanelKind::SQLPreview,
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             _ => {
                 let key: Input = key.to_owned().into();
                 self.comment.input(key);
@@ -2185,10 +2214,16 @@ impl<'a> TableDetailComponent<'a> {
         }
         Ok(ComponentResult::Done)
     }
-    fn handle_panel_sql_preview_event(&mut self, key: &Key) -> Result<ComponentResult> {
+    async fn handle_panel_sql_preview_event(&mut self, key: &Key) -> Result<ComponentResult> {
         match *key {
             TAB_LEFT_KEY => self.panel = PanelKind::Comment,
             TAB_RIGHT_KEY => self.panel = PanelKind::Fields,
+            BACK_KEY => {
+                self.handle_back_event()?;
+            }
+            SAVE_KEY => {
+                self.handle_save_event().await?;
+            }
             _ => (),
         }
         Ok(ComponentResult::Done)
@@ -2385,7 +2420,7 @@ impl<'a> TableDetailComponent<'a> {
                 key: TAB_RIGHT_KEY,
             },
             Command {
-                name: "Previous Panel",
+                name: "Prev Panel",
                 key: TAB_LEFT_KEY,
             },
             Command {

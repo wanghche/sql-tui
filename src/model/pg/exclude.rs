@@ -30,19 +30,31 @@ impl Exclude {
     pub fn comment(&self) -> Option<&str> {
         self.comment.as_deref()
     }
-    pub fn get_create_ddl(&self) -> String {
-        format!(
-            "CONSTRAINT \"{}\" EXCLUDE ({})",
-            self.name(),
-            self.element()
-                .iter()
-                .map(|e| e.get_create_ddl())
-                .collect::<Vec<String>>()
-                .join(",")
+    pub fn get_create_ddl(&self, schema_name: &str, table_name: &str) -> (String, Option<String>) {
+        (
+            format!(
+                r#"CONSTRAINT "{}" EXCLUDE ({})"#,
+                self.name(),
+                self.element()
+                    .iter()
+                    .map(|e| e.get_create_ddl())
+                    .collect::<Vec<String>>()
+                    .join(",")
+            ),
+            self.comment().map(|c| {
+                format!(
+                    r#"COMMENT ON CONSTRAINT "{}" ON "{}"."{}" IS '{}';"#,
+                    self.name(),
+                    schema_name,
+                    table_name,
+                    c
+                )
+            }),
         )
     }
-    pub fn get_add_ddl(&self) -> String {
-        format!("ADD {}", self.get_create_ddl())
+    pub fn get_add_ddl(&self, schema_name: &str, table_name: &str) -> (String, Option<String>) {
+        let (exclude_ddl, comment_ddl) = self.get_create_ddl(schema_name, table_name);
+        (format!("ADD {}", exclude_ddl), comment_ddl)
     }
     pub fn get_drop_ddl(&self) -> String {
         format!("DROP CONSTRAINT {}", self.name)
@@ -55,7 +67,7 @@ impl Exclude {
     ) -> (Vec<String>, Option<String>) {
         let comment = if old.comment() != self.comment() {
             Some(format!(
-                "COMMENT ON \"{}\" ON \"{}\".\"{}\" IS '{}'",
+                r#"COMMENT ON CONSTRAINT "{}" ON "{}"."{}" IS '{}'"#,
                 self.name(),
                 schema_name,
                 table_name,
@@ -78,27 +90,32 @@ impl Exclude {
     }
 }
 pub fn show_pg_exclude_field(row: &[String]) -> String {
-    let mut str = String::from(&row[0]);
-    if !row[1].is_empty() {
-        str = format!("{} {}", str, row[1]);
-    }
-    if !&row[2].is_empty() {
-        str = format!("{} {}", str, row[2]);
-    }
-    if !&row[3].is_empty() {
-        str = format!("{} \"{}\"", str, row[3]);
-    }
-    if !&row[4].is_empty() {
-        str = format!("{} \"{}\"", str, row[4]);
-    }
-    if !&row[5].is_empty() {
-        str = format!("{} {}", str, row[5]);
-    }
-    if !&row[6].is_empty() {
-        str = format!("{} NULLS {}", str, row[6]);
-    }
-    str
+    format!(
+        r#"{}{}{}{}{}"#,
+        &row[0],
+        if !row[1].is_empty() {
+            format!(r#" "{}"."#, &row[1])
+        } else {
+            String::from("")
+        },
+        if !row[2].is_empty() {
+            format!(r#""{}""#, &row[2])
+        } else {
+            String::from("")
+        },
+        if !row[3].is_empty() {
+            format!(r#" "{}"."#, &row[3])
+        } else {
+            String::from("")
+        },
+        if !row[4].is_empty() {
+            format!(r#"{}"#, &row[4])
+        } else {
+            String::from("")
+        }
+    )
 }
+
 #[derive(Clone)]
 pub struct ExcludeElement {
     pub element: String,
@@ -243,7 +260,7 @@ pub fn convert_row_to_pg_exclude(rows: Vec<PgRow>) -> Vec<Exclude> {
                 name: row.try_get("conname").unwrap(),
                 index_method: index_method.map(|im|IndexMethod::try_from(im.as_str()).unwrap()),
                 element,
-                comment: None,
+                comment: row.try_get("comment").unwrap(),
             }
         })
         .collect()
